@@ -90,6 +90,14 @@ service-account*.json
 .gcloud/
 gcloud-service-key.json
 
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.eslintcache
+
 # macOS
 .DS_Store
 .AppleDouble
