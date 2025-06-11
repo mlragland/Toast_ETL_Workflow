@@ -1,6 +1,10 @@
-"""Transformer modules for Toast ETL Pipeline."""
+"""
+Toast ETL Data Transformers Package
 
-from .base_transformer import BaseTransformer
-from .csv_transformer import CSVTransformer
+This package contains data transformation modules for processing
+Toast POS CSV exports into BigQuery-ready format.
+"""
 
-__all__ = ["BaseTransformer", "CSVTransformer"] 
+from .toast_transformer import ToastDataTransformer
+
+__all__ = ['ToastDataTransformer'] 

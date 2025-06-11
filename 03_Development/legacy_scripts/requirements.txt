@@ -1,0 +1,5 @@
+flask
+paramiko
+google-cloud-pubsub
+google-cloud-storage
+gunicorn
