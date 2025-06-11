@@ -572,4 +572,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    # Check if we're running in server mode (for Cloud Run)
+    if os.getenv('FLASK_APP') or os.getenv('PORT'):
+        # Import and run the Flask app
+        from src.server.app import app
+        port = int(os.environ.get('PORT', 8080))
+        app.run(host='0.0.0.0', port=port, debug=False)
+    else:
+        # Run the CLI version
+        main() 

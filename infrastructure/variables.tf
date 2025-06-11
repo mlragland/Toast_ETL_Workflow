@@ -98,6 +98,43 @@ variable "etl_schedule" {
   default     = "30 4 * * *"  # 4:30 AM daily
 }
 
+# Cloud Run Configuration
+variable "vpc_connector_name" {
+  description = "VPC connector name for Cloud Run"
+  type        = string
+  default     = ""
+}
+
+variable "custom_domain" {
+  description = "Custom domain for Cloud Run service (optional)"
+  type        = string
+  default     = ""
+}
+
+variable "cloud_run_cpu" {
+  description = "CPU allocation for Cloud Run service"
+  type        = string
+  default     = "2"
+}
+
+variable "cloud_run_memory" {
+  description = "Memory allocation for Cloud Run service"
+  type        = string
+  default     = "4Gi"
+}
+
+variable "cloud_run_timeout" {
+  description = "Request timeout for Cloud Run service in seconds"
+  type        = number
+  default     = 3600
+}
+
+variable "cloud_run_max_instances" {
+  description = "Maximum number of Cloud Run instances"
+  type        = number
+  default     = 10
+}
+
 # Labels
 variable "labels" {
   description = "Common labels to apply to all resources"

@@ -5,6 +5,8 @@ import subprocess
 from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
+import shutil
+import shutil
 
 from ..config.settings import settings
 from ..utils.logging_utils import get_logger
@@ -200,6 +202,21 @@ class SFTPExtractor:
         
         return file_info
     
+    def cleanup_date_files(self, date: str) -> None:
+        """
+        Clean up downloaded files for a specific date.
+        
+        Args:
+            date: Date in YYYYMMDD format
+        """
+        try:
+            local_date_dir = os.path.join(self.local_dir, date)
+            if os.path.exists(local_date_dir):
+                logger.info(f"Cleaning up files for date: {date}")
+                shutil.rmtree(local_date_dir)
+        except Exception as e:
+            logger.error(f"Error cleaning up files for {date}: {e}")
+    
     def cleanup_old_files(self, days_to_keep: int = 7) -> None:
         """
         Clean up old downloaded files to save disk space.
@@ -220,7 +237,6 @@ class SFTPExtractor:
                     # Check if directory is older than cutoff
                     if os.path.getmtime(item_path) < cutoff_date:
                         logger.info(f"Cleaning up old directory: {item_path}")
-                        import shutil
                         shutil.rmtree(item_path)
                         
         except Exception as e:

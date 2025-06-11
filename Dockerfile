@@ -44,13 +44,18 @@ RUN mkdir -p /app/logs /app/tmp && chown -R etluser:etluser /app
 # Switch to non-root user
 USER etluser
 
-# Add health check
+# Add health check for web server mode
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import sys; sys.exit(0)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || python -c "import sys; sys.exit(0)"
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
+ENV FLASK_APP=main.py
 
-# Default command
+# Expose port for Cloud Run
+EXPOSE 8080
+
+# Default command (supports both CLI and web server modes)
 CMD ["python", "main.py"] 
