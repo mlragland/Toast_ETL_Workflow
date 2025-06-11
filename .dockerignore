@@ -1,0 +1,79 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Development directories
+01_Product_Management/
+02_Architecture/
+03_Development/
+04_UX_UI/
+05_Testing/ 
+06_Operations/
+07_Onboarding/
+
+# Logs and temporary files
+logs/
+*.log
+tmp/
+temp/
+
+# Configuration (will be injected at runtime)
+.env
+.env.local
+.env.production
+
+# Infrastructure files (not needed in container)
+infrastructure/
+cloudbuild.yaml
+docker-compose.yml 

@@ -10,10 +10,13 @@ import sys
 import argparse
 from datetime import datetime, timedelta
 from typing import Optional
+from pathlib import Path
+import pandas as pd
 
 from src.config.settings import settings
 from src.utils.logging_utils import setup_logging
 from src.extractors.sftp_extractor import SFTPExtractor
+from src.loaders.bigquery_loader import BigQueryLoader
 
 
 def parse_arguments():
@@ -153,12 +156,13 @@ def run_transformation(date: str, input_dir: str, logger) -> bool:
     return True
 
 
-def run_loading(date: str, logger) -> bool:
+def run_loading(date: str, input_dir: str, logger) -> bool:
     """
     Run the data loading phase.
     
     Args:
         date: Date in YYYYMMDD format
+        input_dir: Directory containing processed files
         logger: Logger instance
         
     Returns:
@@ -168,11 +172,89 @@ def run_loading(date: str, logger) -> bool:
     logger.info("PHASE 3: LOADING")
     logger.info("=" * 60)
     
-    # TODO: Implement loading logic
-    # This will use the GCSLoader and BigQueryLoader classes we'll create next
-    logger.info("Loading phase - TO BE IMPLEMENTED")
-    
-    return True
+    try:
+        # Initialize BigQuery loader
+        bq_loader = BigQueryLoader()
+        
+        # Find all CSV files in the input directory
+        input_path = Path(input_dir)
+        csv_files = list(input_path.glob("*.csv"))
+        
+        if not csv_files:
+            logger.warning(f"No CSV files found in {input_dir}")
+            return True
+        
+        logger.info(f"Found {len(csv_files)} CSV files to load")
+        
+        # Load each CSV file to BigQuery
+        results = []
+        for csv_file in csv_files:
+            logger.info(f"Loading {csv_file.name} to BigQuery")
+            
+            try:
+                # Read CSV file
+                df = pd.read_csv(csv_file)
+                
+                # Determine table name from filename
+                table_name = csv_file.stem.lower().replace(' ', '_')
+                
+                # Map common Toast file patterns to table names
+                table_mapping = {
+                    'allitemsreport': 'all_items_report',
+                    'checkdetails': 'check_details',
+                    'cashentries': 'cash_entries',
+                    'itemselectiondetails': 'item_selection_details',
+                    'kitchentimings': 'kitchen_timings',
+                    'orderdetails': 'order_details',
+                    'paymentdetails': 'payment_details'
+                }
+                
+                # Use mapped table name if available
+                table_name = table_mapping.get(table_name, table_name)
+                
+                # Load to BigQuery
+                result = bq_loader.load_dataframe(
+                    df=df,
+                    table_name=table_name,
+                    source_file=csv_file.name
+                )
+                
+                results.append(result)
+                
+                if result['success']:
+                    logger.info(f"✅ Loaded {result['rows_loaded']} rows to {table_name}")
+                else:
+                    logger.error(f"❌ Failed to load {csv_file.name}: {result['errors']}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to process {csv_file.name}: {str(e)}")
+                results.append({
+                    'success': False,
+                    'table_name': table_name if 'table_name' in locals() else 'unknown',
+                    'source_file': csv_file.name,
+                    'errors': str(e)
+                })
+        
+        # Summary
+        successful_loads = [r for r in results if r['success']]
+        failed_loads = [r for r in results if not r['success']]
+        
+        logger.info(f"Loading summary: {len(successful_loads)} successful, {len(failed_loads)} failed")
+        
+        if successful_loads:
+            total_rows = sum(r['rows_loaded'] for r in successful_loads)
+            logger.info(f"Total rows loaded: {total_rows}")
+        
+        if failed_loads:
+            logger.error("Failed loads:")
+            for result in failed_loads:
+                logger.error(f"  - {result['source_file']}: {result['errors']}")
+        
+        return len(failed_loads) == 0
+        
+    except Exception as e:
+        logger.error(f"Loading phase failed: {e}")
+        return False
 
 
 def cleanup_temp_files(date: str, logger) -> None:
@@ -244,7 +326,11 @@ def main():
         
         # Phase 3: Loading
         if run_load:
-            success = run_loading(date, logger)
+            if not local_dir:
+                # If we're only running load, assume files are already processed
+                local_dir = f"{settings.raw_local_dir}/{date}"
+            
+            success = run_loading(date, local_dir, logger)
             if not success:
                 logger.error("Pipeline failed during loading phase")
                 sys.exit(1)

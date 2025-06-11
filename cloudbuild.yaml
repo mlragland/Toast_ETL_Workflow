@@ -1,0 +1,66 @@
+steps:
+  # Run tests first
+  - name: 'python:3.11-slim'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install -r requirements.txt
+        python -m pytest tests/ -v --tb=short
+    id: 'test'
+
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/toast-etl:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/toast-etl:latest'
+      - '.'
+    id: 'build'
+    waitFor: ['test']
+
+  # Push the Docker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/toast-etl:${SHORT_SHA}'
+    id: 'push-sha'
+    waitFor: ['build']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/toast-etl:latest'
+    id: 'push-latest'
+    waitFor: ['build']
+
+  # Security scan (optional but recommended)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      - 'container'
+      - 'images'
+      - 'scan'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/toast-etl:${SHORT_SHA}'
+    id: 'scan'
+    waitFor: ['push-sha']
+
+# Configure substitutions for flexible builds
+substitutions:
+  _REGION: 'us-central1'
+  _REPOSITORY: 'toast-etl-repo'
+
+# Build configuration
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+
+# Build timeout
+timeout: '1200s'
+
+# Tags for organization
+tags:
+  - 'toast-etl'
+  - 'etl-pipeline'
+  - 'production' 
