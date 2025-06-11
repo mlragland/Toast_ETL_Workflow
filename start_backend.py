@@ -229,6 +229,119 @@ def top_servers():
             'message': f'Failed to get top servers: {str(e)}'
         }), 500
 
+@app.route('/api/runs', methods=['GET'])
+def etl_runs():
+    """Get recent ETL run metadata."""
+    try:
+        # For now, return mock data since we don't have an ETL runs table yet
+        # In a full implementation, this would query an etl_runs_log table
+        runs = [
+            {
+                'run_id': 'etl_2024_06_11_04_30',
+                'start_time': '2024-06-11T04:30:00Z',
+                'end_time': '2024-06-11T04:45:00Z',
+                'status': 'completed',
+                'records_processed': 1234,
+                'files_processed': ['order_details.csv', 'all_items_report.csv'],
+                'duration_minutes': 15
+            },
+            {
+                'run_id': 'etl_2024_06_10_04_30',
+                'start_time': '2024-06-10T04:30:00Z',
+                'end_time': '2024-06-10T04:42:00Z',
+                'status': 'completed',
+                'records_processed': 1187,
+                'files_processed': ['order_details.csv', 'all_items_report.csv'],
+                'duration_minutes': 12
+            }
+        ]
+        
+        return jsonify({
+            'status': 'success',
+            'data': runs
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to get ETL runs: {str(e)}'
+        }), 500
+
+@app.route('/api/metrics', methods=['GET'])
+def file_metrics():
+    """Get file-level processing metrics."""
+    try:
+        # Get table statistics as file metrics
+        tables = ['order_details', 'all_items_report', 'check_details', 
+                 'cash_entries', 'item_selection_details', 'kitchen_timings', 'payment_details']
+        
+        metrics = []
+        for table_name in tables:
+            try:
+                table = bq_client.get_table(f'{PROJECT_ID}.{DATASET_ID}.{table_name}')
+                metrics.append({
+                    'file_type': table_name,
+                    'total_records': table.num_rows,
+                    'size_mb': round(table.num_bytes / (1024 * 1024), 2) if table.num_bytes else 0,
+                    'last_updated': str(table.modified) if table.modified else None,
+                    'status': 'active' if table.num_rows > 0 else 'empty'
+                })
+            except Exception:
+                metrics.append({
+                    'file_type': table_name,
+                    'total_records': 0,
+                    'size_mb': 0,
+                    'last_updated': None,
+                    'status': 'not_found'
+                })
+        
+        return jsonify({
+            'status': 'success',
+            'data': metrics
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to get file metrics: {str(e)}'
+        }), 500
+
+@app.route('/api/backfill', methods=['POST'])
+def trigger_backfill():
+    """Trigger bulk re-ingestion for specified date range."""
+    try:
+        data = request.get_json()
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        if not start_date or not end_date:
+            return jsonify({
+                'status': 'error',
+                'message': 'start_date and end_date are required'
+            }), 400
+        
+        # For now, return a mock response
+        # In a full implementation, this would trigger the actual backfill process
+        backfill_job = {
+            'job_id': f'backfill_{start_date}_{end_date}',
+            'status': 'queued',
+            'start_date': start_date,
+            'end_date': end_date,
+            'created_at': datetime.utcnow().isoformat(),
+            'message': f'Backfill job queued for {start_date} to {end_date}'
+        }
+        
+        return jsonify({
+            'status': 'success',
+            'data': backfill_job
+        }), 202
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to trigger backfill: {str(e)}'
+        }), 500
+
 @app.route('/', methods=['GET'])
 def index():
     """Simple index page showing available endpoints."""
@@ -241,6 +354,9 @@ def index():
         <li><a href="/api/orders/recent">/api/orders/recent</a> - Recent orders</li>
         <li><a href="/api/analytics/sales-by-service">/api/analytics/sales-by-service</a> - Sales by service</li>
         <li><a href="/api/analytics/top-servers">/api/analytics/top-servers</a> - Top servers</li>
+        <li><a href="/api/runs">/api/runs</a> - ETL run metadata</li>
+        <li><a href="/api/metrics">/api/metrics</a> - File processing metrics</li>
+        <li>POST /api/backfill - Trigger bulk re-ingestion</li>
     </ul>
     <p><strong>React Frontend:</strong> <a href="http://localhost:3000">http://localhost:3000</a></p>
     """
