@@ -196,8 +196,8 @@ class ToastDataTransformer:
             },
             "date_columns": ["processing_date"],
             "datetime_columns": ["opened", "paid", "closed"],
-            "time_columns": ["duration_opened_to_paid"],
-            "boolean_columns": ["voided"]
+            "boolean_columns": ["voided"],
+            "special_processing": {"duration_opened_to_paid": "convert_to_minutes"}
         },
         
         "PaymentDetails.csv": {
@@ -309,6 +309,7 @@ class ToastDataTransformer:
         Convert time string to total minutes.
         
         Parses formats like:
+        - "02:25:02" (HH:MM:SS) → "145.0"
         - "2 hours, 15 minutes, 30 seconds" → "135.5"
         - "45 minutes" → "45.0"
         - "1 hour, 30 seconds" → "60.5"
@@ -323,12 +324,25 @@ class ToastDataTransformer:
             return "0.0"
             
         try:
-            time_str = str(time_str).lower()
+            time_str = str(time_str).strip()
+            
+            # Check if it's in HH:MM:SS format
+            if re.match(r'^\d{1,2}:\d{2}:\d{2}$', time_str):
+                parts = time_str.split(':')
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                seconds = int(parts[2])
+                
+                total_minutes = hours * 60 + minutes + seconds / 60
+                return f"{total_minutes:.1f}"
+            
+            # Otherwise, try the legacy text format
+            time_str_lower = time_str.lower()
             
             # Extract hours, minutes, seconds using regex
-            hour_match = re.search(r'(\d+)\s*hour', time_str)
-            minute_match = re.search(r'(\d+)\s*minute', time_str)
-            second_match = re.search(r'(\d+)\s*second', time_str)
+            hour_match = re.search(r'(\d+)\s*hour', time_str_lower)
+            minute_match = re.search(r'(\d+)\s*minute', time_str_lower)
+            second_match = re.search(r'(\d+)\s*second', time_str_lower)
             
             hours = int(hour_match.group(1)) if hour_match else 0
             minutes = int(minute_match.group(1)) if minute_match else 0

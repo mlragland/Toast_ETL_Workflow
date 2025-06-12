@@ -6,6 +6,7 @@ Phase 6 Development Server
 
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def health():
 
 @app.route('/api/dashboard/summary', methods=['GET'])
 def dashboard_summary():
-    """Get dashboard summary statistics."""
+    """Get dashboard summary statistics excluding closure records."""
     try:
         # Get table row counts
         tables = ['order_details', 'all_items_report', 'check_details', 
@@ -60,7 +61,7 @@ def dashboard_summary():
             except Exception:
                 table_stats[table_name] = {'rows': 0, 'size_mb': 0}
         
-        # Get business metrics if we have order data
+        # Get business metrics if we have order data (excluding closure records)
         business_metrics = {}
         if table_stats['order_details']['rows'] > 0:
             query = f"""
@@ -70,9 +71,11 @@ def dashboard_summary():
                 ROUND(AVG(total), 2) as avg_order_value,
                 MIN(DATE(opened)) as earliest_date,
                 MAX(DATE(opened)) as latest_date,
-                COUNT(DISTINCT DATE(opened)) as unique_dates
+                COUNT(DISTINCT DATE(opened)) as unique_dates,
+                COUNT(CASE WHEN closure_indicator = TRUE THEN 1 END) as closure_days
             FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
-            WHERE total IS NOT NULL
+            WHERE total IS NOT NULL 
+            AND (closure_indicator IS NULL OR closure_indicator = FALSE)
             """
             
             result = bq_client.query(query).result()
@@ -83,7 +86,8 @@ def dashboard_summary():
                     'avg_order_value': row.avg_order_value,
                     'earliest_date': str(row.earliest_date) if row.earliest_date else None,
                     'latest_date': str(row.latest_date) if row.latest_date else None,
-                    'unique_dates': row.unique_dates
+                    'unique_dates': row.unique_dates,
+                    'closure_days': row.closure_days
                 }
         
         return jsonify({
@@ -104,7 +108,7 @@ def dashboard_summary():
 
 @app.route('/api/orders/recent', methods=['GET'])
 def recent_orders():
-    """Get recent orders data."""
+    """Get recent orders data excluding closure records."""
     try:
         limit = request.args.get('limit', 10, type=int)
         
@@ -119,7 +123,8 @@ def recent_orders():
             service,
             guest_count
         FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
-        WHERE total > 0
+        WHERE total > 0 
+        AND (closure_indicator IS NULL OR closure_indicator = FALSE)
         ORDER BY opened DESC
         LIMIT {limit}
         """
@@ -152,7 +157,7 @@ def recent_orders():
 
 @app.route('/api/analytics/sales-by-service', methods=['GET'])
 def sales_by_service():
-    """Get sales breakdown by service type."""
+    """Get sales breakdown by service type excluding closure records."""
     try:
         query = f"""
         SELECT 
@@ -162,6 +167,7 @@ def sales_by_service():
             ROUND(AVG(total), 2) as avg_order_value
         FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
         WHERE service IS NOT NULL AND service != '' AND total > 0
+        AND (closure_indicator IS NULL OR closure_indicator = FALSE)
         GROUP BY service
         ORDER BY total_sales DESC
         """
@@ -190,7 +196,7 @@ def sales_by_service():
 
 @app.route('/api/analytics/top-servers', methods=['GET'])
 def top_servers():
-    """Get top servers by sales."""
+    """Get top servers by sales excluding closure records."""
     try:
         limit = request.args.get('limit', 10, type=int)
         
@@ -202,6 +208,7 @@ def top_servers():
             ROUND(AVG(total), 2) as avg_order_value
         FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
         WHERE server IS NOT NULL AND server != '' AND total > 0
+        AND (closure_indicator IS NULL OR closure_indicator = FALSE)
         GROUP BY server
         ORDER BY total_sales DESC
         LIMIT {limit}
@@ -227,6 +234,117 @@ def top_servers():
         return jsonify({
             'status': 'error',
             'message': f'Failed to get top servers: {str(e)}'
+        }), 500
+
+@app.route('/api/analytics/closure-summary', methods=['GET'])
+def closure_summary():
+    """Get business closure summary for operational insights."""
+    try:
+        query = f"""
+        SELECT 
+            processing_date,
+            closure_reason,
+            COUNT(*) as closure_records,
+            COUNT(DISTINCT closure_reason) as unique_reasons
+        FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
+        WHERE closure_indicator = TRUE
+        GROUP BY processing_date, closure_reason
+        ORDER BY processing_date DESC
+        LIMIT 50
+        """
+        
+        result = bq_client.query(query).result()
+        closures = []
+        
+        for row in result:
+            closures.append({
+                'date': str(row.processing_date),
+                'reason': row.closure_reason,
+                'records': row.closure_records
+            })
+        
+        # Get closure pattern analysis
+        pattern_query = f"""
+        SELECT 
+            closure_reason,
+            COUNT(DISTINCT processing_date) as closure_days,
+            COUNT(*) as total_records
+        FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
+        WHERE closure_indicator = TRUE
+        GROUP BY closure_reason
+        ORDER BY closure_days DESC
+        """
+        
+        pattern_result = bq_client.query(pattern_query).result()
+        patterns = []
+        
+        for row in pattern_result:
+            patterns.append({
+                'reason': row.closure_reason,
+                'closure_days': row.closure_days,
+                'total_records': row.total_records
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'recent_closures': closures,
+                'closure_patterns': patterns
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to get closure summary: {str(e)}'
+        }), 500
+
+@app.route('/api/analytics/daily-trends', methods=['GET'])
+def daily_trends():
+    """Get daily business trends excluding closure days."""
+    try:
+        days = request.args.get('days', 30, type=int)
+        
+        query = f"""
+        SELECT 
+            DATE(opened) as business_date,
+            COUNT(*) as order_count,
+            ROUND(SUM(total), 2) as daily_sales,
+            ROUND(AVG(total), 2) as avg_order_value,
+            COUNT(DISTINCT server) as active_servers,
+            MIN(opened) as first_order,
+            MAX(opened) as last_order
+        FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
+        WHERE DATE(opened) >= DATE_SUB(CURRENT_DATE(), INTERVAL {days} DAY)
+        AND total > 0
+        AND (closure_indicator IS NULL OR closure_indicator = FALSE)
+        GROUP BY DATE(opened)
+        ORDER BY business_date DESC
+        """
+        
+        result = bq_client.query(query).result()
+        trends = []
+        
+        for row in result:
+            trends.append({
+                'date': str(row.business_date),
+                'order_count': row.order_count,
+                'daily_sales': float(row.daily_sales),
+                'avg_order_value': float(row.avg_order_value),
+                'active_servers': row.active_servers,
+                'first_order': str(row.first_order),
+                'last_order': str(row.last_order)
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'data': trends
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to get daily trends: {str(e)}'
         }), 500
 
 @app.route('/api/runs', methods=['GET'])
@@ -320,16 +438,21 @@ def trigger_backfill():
                 'message': 'start_date and end_date are required'
             }), 400
         
-        # For now, return a mock response
-        # In a full implementation, this would trigger the actual backfill process
+        # Create job ID
+        job_id = f'backfill_{start_date}_{end_date}_{int(time.time())}'
+        
+        # TODO: In a production environment, this would be queued to a job processor
+        # For now, we return a mock response that simulates job creation
         backfill_job = {
-            'job_id': f'backfill_{start_date}_{end_date}',
+            'job_id': job_id,
             'status': 'queued',
             'start_date': start_date,
             'end_date': end_date,
             'created_at': datetime.utcnow().isoformat(),
-            'message': f'Backfill job queued for {start_date} to {end_date}'
+            'message': f'Backfill job {job_id} queued for {start_date} to {end_date}. Use CLI for actual processing.'
         }
+        
+        logger.info(f"Backfill job created: {job_id} for {start_date} to {end_date}")
         
         return jsonify({
             'status': 'success',
@@ -337,9 +460,55 @@ def trigger_backfill():
         }), 202
         
     except Exception as e:
+        logger.error(f"Backfill trigger failed: {e}")
         return jsonify({
             'status': 'error',
             'message': f'Failed to trigger backfill: {str(e)}'
+        }), 500
+
+@app.route('/api/backfill', methods=['GET'])
+def get_backfill_jobs():
+    """Get list of recent backfill jobs."""
+    try:
+        # Mock backfill jobs data
+        # In a production environment, this would query a job tracking database
+        mock_jobs = [
+            {
+                'job_id': 'backfill_20240607_20240609_1234567890',
+                'status': 'completed',
+                'start_date': '20240607',
+                'end_date': '20240609',
+                'created_at': '2024-06-10T10:30:00Z',
+                'message': 'Successfully processed 3 dates with 152 records'
+            },
+            {
+                'job_id': 'backfill_20240601_20240605_1234567891',
+                'status': 'failed',
+                'start_date': '20240601',
+                'end_date': '20240605',
+                'created_at': '2024-06-10T09:15:00Z',
+                'message': 'Failed: SFTP connection timeout'
+            },
+            {
+                'job_id': 'backfill_20240610_20240612_1234567892',
+                'status': 'running',
+                'start_date': '20240610',
+                'end_date': '20240612',
+                'created_at': '2024-06-10T11:00:00Z',
+                'message': 'Processing... 2/3 dates completed'
+            }
+        ]
+        
+        return jsonify({
+            'status': 'success',
+            'data': mock_jobs
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Failed to get backfill jobs: {e}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Failed to get backfill jobs: {str(e)}'
         }), 500
 
 @app.route('/', methods=['GET'])

@@ -68,7 +68,7 @@ class SchemaEnforcer:
             {"name": "tax", "type": "FLOAT", "mode": "NULLABLE"},
             {"name": "tender", "type": "STRING", "mode": "NULLABLE"},
             {"name": "check_id", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "check_number", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "check_number", "type": "INTEGER", "mode": "NULLABLE"},
             {"name": "total", "type": "FLOAT", "mode": "NULLABLE"},
             {"name": "customer_family", "type": "STRING", "mode": "NULLABLE"},
             {"name": "table_size", "type": "INTEGER", "mode": "NULLABLE"},
@@ -79,7 +79,7 @@ class SchemaEnforcer:
         ],
         "CashEntries.csv": [
             {"name": "location", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "entry_id", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "entry_id", "type": "STRING", "mode": "REQUIRED"},
             {"name": "created_date", "type": "DATETIME", "mode": "NULLABLE"},
             {"name": "action", "type": "STRING", "mode": "NULLABLE"},
             {"name": "amount", "type": "FLOAT", "mode": "NULLABLE"},
@@ -94,7 +94,7 @@ class SchemaEnforcer:
         "ItemSelectionDetails.csv": [
             {"name": "location", "type": "STRING", "mode": "NULLABLE"},
             {"name": "order_id", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "order_number", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "order_number", "type": "INTEGER", "mode": "NULLABLE"},
             {"name": "sent_date", "type": "DATETIME", "mode": "NULLABLE"},
             {"name": "order_date", "type": "DATETIME", "mode": "NULLABLE"},
             {"name": "check_id", "type": "STRING", "mode": "NULLABLE"},
@@ -122,7 +122,7 @@ class SchemaEnforcer:
             {"name": "deferred", "type": "BOOLEAN", "mode": "NULLABLE"},
             {"name": "tax_exempt", "type": "BOOLEAN", "mode": "NULLABLE"},
             {"name": "tax_inclusion_option", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "dining_option_tax", "type": "FLOAT", "mode": "NULLABLE"},
+            {"name": "dining_option_tax", "type": "STRING", "mode": "NULLABLE"},
             {"name": "tab_name", "type": "STRING", "mode": "NULLABLE"},
             {"name": "processing_date", "type": "DATE", "mode": "NULLABLE"}
         ],
@@ -130,7 +130,7 @@ class SchemaEnforcer:
             {"name": "location", "type": "STRING", "mode": "NULLABLE"},
             {"name": "id", "type": "STRING", "mode": "NULLABLE"},
             {"name": "server", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "check_number", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "check_number", "type": "INTEGER", "mode": "NULLABLE"},
             {"name": "table", "type": "STRING", "mode": "NULLABLE"},
             {"name": "check_opened", "type": "DATETIME", "mode": "NULLABLE"},
             {"name": "station", "type": "STRING", "mode": "NULLABLE"},
@@ -164,7 +164,7 @@ class SchemaEnforcer:
             {"name": "voided", "type": "BOOLEAN", "mode": "NULLABLE"},
             {"name": "paid", "type": "DATETIME", "mode": "NULLABLE"},
             {"name": "closed", "type": "DATETIME", "mode": "NULLABLE"},
-            {"name": "duration_opened_to_paid", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "duration_opened_to_paid", "type": "TIME", "mode": "NULLABLE"},
             {"name": "order_source", "type": "STRING", "mode": "NULLABLE"},
             {"name": "processing_date", "type": "DATE", "mode": "NULLABLE"}
         ],

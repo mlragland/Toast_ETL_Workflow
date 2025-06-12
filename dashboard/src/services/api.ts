@@ -57,6 +57,15 @@ export interface ServiceSales {
   avg_order_value: number;
 }
 
+export interface BackfillJob {
+  job_id: string;
+  start_date: string;
+  end_date: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  created_at: string;
+  message: string;
+}
+
 // API Service Class
 class ApiService {
   // Health check
@@ -108,6 +117,20 @@ class ApiService {
       return response.data.data;
     }
     throw new Error('Failed to fetch sales by service');
+  }
+
+  // Backfill functionality
+  async getBackfillJobs(): Promise<BackfillJob[]> {
+    const response = await apiClient.get('/api/backfill');
+    return response.data.data;
+  }
+
+  async triggerBackfill(startDate: string, endDate: string): Promise<BackfillJob> {
+    const response = await apiClient.post('/api/backfill', {
+      start_date: startDate,
+      end_date: endDate
+    });
+    return response.data.data;
   }
 }
 

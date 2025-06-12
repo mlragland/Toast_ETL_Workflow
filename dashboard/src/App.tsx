@@ -7,6 +7,7 @@ import {
   RecentOrder,
   ServiceSales 
 } from './services/api';
+import { BackfillPanel } from './components/BackfillPanel';
 
 function App() {
   // State for dashboard data
@@ -297,6 +298,11 @@ function App() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Historical Backfill Section */}
+        <div className="mt-8">
+          <BackfillPanel />
         </div>
 
         {/* Status Banner */}

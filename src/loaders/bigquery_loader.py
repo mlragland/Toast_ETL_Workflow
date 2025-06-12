@@ -21,6 +21,7 @@ import pandas as pd
 from src.utils.logging_utils import get_logger
 from src.utils.retry_utils import retry_with_backoff
 from src.config.settings import settings
+from src.validators.schema_enforcer import SchemaEnforcer
 
 logger = get_logger(__name__)
 
@@ -46,10 +47,138 @@ class BigQueryLoader:
         self.client = bigquery.Client(project=self.project_id)
         self.dataset_ref = self.client.dataset(self.dataset_id)
         
+        # Initialize schema enforcer for consistent schemas
+        self.schema_enforcer = SchemaEnforcer()
+        
         # Table schemas for each Toast data source
         self.table_schemas = self._get_table_schemas()
         
         logger.info(f"BigQuery loader initialized for project: {self.project_id}, dataset: {self.dataset_id}")
+    
+    def _convert_schema_to_bigquery_fields(self, schema_definition: List[Dict]) -> List[bigquery.SchemaField]:
+        """
+        Convert schema definition to BigQuery SchemaField objects.
+        
+        Args:
+            schema_definition: List of field definitions from schema enforcer
+            
+        Returns:
+            List of BigQuery SchemaField objects
+        """
+        fields = []
+        for field_def in schema_definition:
+            # Map our types to BigQuery types
+            bq_type = field_def['type']
+            if bq_type == 'DATETIME':
+                bq_type = 'TIMESTAMP'
+            
+            mode = field_def.get('mode', 'NULLABLE')
+            
+            field = bigquery.SchemaField(
+                name=field_def['name'],
+                field_type=bq_type,
+                mode=mode
+            )
+            fields.append(field)
+        
+        return fields
+    
+    def _get_table_name_from_csv(self, csv_filename: str) -> str:
+        """
+        Convert CSV filename to BigQuery table name.
+        
+        Args:
+            csv_filename: Name of the CSV file
+            
+        Returns:
+            BigQuery table name
+        """
+        # Mapping from CSV files to table names
+        table_mappings = {
+            'AllItemsReport.csv': 'all_items_report',
+            'CheckDetails.csv': 'check_details', 
+            'CashEntries.csv': 'cash_entries',
+            'ItemSelectionDetails.csv': 'item_selection_details',
+            'KitchenTimings.csv': 'kitchen_timings',
+            'OrderDetails.csv': 'order_details',
+            'PaymentDetails.csv': 'payment_details'
+        }
+        
+        return table_mappings.get(csv_filename, csv_filename.lower().replace('.csv', ''))
+    
+    def _fix_dataframe_types(self, df: pd.DataFrame, table_name: str) -> pd.DataFrame:
+        """
+        Fix pandas DataFrame types to prevent PyArrow conversion errors.
+        
+        Args:
+            df: Input DataFrame
+            table_name: Target table name
+            
+        Returns:
+            DataFrame with corrected types
+        """
+        # Get the CSV filename from table name
+        csv_filename = None
+        for csv, tbl in [
+            ('AllItemsReport.csv', 'all_items_report'),
+            ('CheckDetails.csv', 'check_details'), 
+            ('CashEntries.csv', 'cash_entries'),
+            ('ItemSelectionDetails.csv', 'item_selection_details'),
+            ('KitchenTimings.csv', 'kitchen_timings'),
+            ('OrderDetails.csv', 'order_details'),
+            ('PaymentDetails.csv', 'payment_details')
+        ]:
+            if tbl == table_name:
+                csv_filename = csv
+                break
+        
+        if not csv_filename:
+            logger.warning(f"No CSV mapping found for table {table_name}")
+            return df
+        
+        # Get schema definition
+        schema_definition = self.schema_enforcer.get_schema_for_file(csv_filename)
+        if not schema_definition:
+            logger.warning(f"No schema definition found for {csv_filename}")
+            return df
+        
+        # Create a copy to avoid modifying the original
+        df_fixed = df.copy()
+        
+        # Convert columns based on schema
+        for field_def in schema_definition:
+            col_name = field_def['name']
+            col_type = field_def['type']
+            
+            if col_name in df_fixed.columns:
+                try:
+                    if col_type == 'STRING':
+                        # Convert to string, handling NaN values
+                        df_fixed[col_name] = df_fixed[col_name].astype(str)
+                        df_fixed[col_name] = df_fixed[col_name].replace('nan', '')
+                        df_fixed[col_name] = df_fixed[col_name].replace('None', '')
+                    elif col_type == 'INTEGER':
+                        # Convert to nullable integer
+                        df_fixed[col_name] = pd.to_numeric(df_fixed[col_name], errors='coerce').astype('Int64')
+                    elif col_type == 'FLOAT':
+                        # Convert to float
+                        df_fixed[col_name] = pd.to_numeric(df_fixed[col_name], errors='coerce').astype('float64')
+                    elif col_type == 'BOOLEAN':
+                        # Convert to boolean
+                        df_fixed[col_name] = df_fixed[col_name].astype(bool)
+                    elif col_type in ['DATE', 'DATETIME', 'TIME']:
+                        # Keep as string for BigQuery to parse
+                        df_fixed[col_name] = df_fixed[col_name].astype(str)
+                        df_fixed[col_name] = df_fixed[col_name].replace('nan', '')
+                        df_fixed[col_name] = df_fixed[col_name].replace('None', '')
+                        
+                except Exception as e:
+                    logger.warning(f"Error converting column {col_name} to {col_type}: {e}")
+                    # Fallback to string
+                    df_fixed[col_name] = df_fixed[col_name].astype(str)
+                    df_fixed[col_name] = df_fixed[col_name].replace('nan', '')
+        
+        return df_fixed
     
     def _get_table_schemas(self) -> Dict[str, List[bigquery.SchemaField]]:
         """
