@@ -1965,7 +1965,7 @@ def api_kpi_benchmarks():
             CONCAT(last_4_card_digits, '-', COALESCE(card_type, '')) AS ckey,
             COUNT(DISTINCT DATE(CAST(paid_date AS DATETIME))) AS visit_days,
             ROUND(SUM(amount), 2) AS total_spend,
-            DATE_DIFF(DATE @ed, MAX(DATE(CAST(paid_date AS DATETIME))), DAY) AS recency
+            DATE_DIFF(PARSE_DATE('%Y-%m-%d', @ed), MAX(DATE(CAST(paid_date AS DATETIME))), DAY) AS recency
           FROM deduped
           GROUP BY ckey
         )
