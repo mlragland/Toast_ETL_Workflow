@@ -13,7 +13,7 @@ from datetime import datetime
 
 from .routes import register_routes
 from .utils import setup_logging, handle_errors
-from .monitoring import setup_monitoring
+# from .monitoring import setup_monitoring
 
 
 def create_app():
@@ -35,8 +35,8 @@ def create_app():
     setup_logging(app)
     
     # Setup monitoring
-    if app.config['ENABLE_MONITORING']:
-        setup_monitoring(app)
+    # if app.config['ENABLE_MONITORING']:
+    #     setup_monitoring(app)
     
     # Register routes
     register_routes(app)

@@ -414,8 +414,18 @@ class ToastDataTransformer:
             if "datetime_columns" in config:
                 for col in config["datetime_columns"]:
                     if col in df.columns:
-                        df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
-                        logger.debug(f"Formatted datetime column: {col}")
+                        try:
+                            # First convert to datetime
+                            df[col] = pd.to_datetime(df[col], errors="coerce")
+                            # Then format as string
+                            df[col] = df[col].dt.strftime("%Y-%m-%d %H:%M:%S")
+                            # Replace NaT with empty string
+                            df[col] = df[col].fillna("")
+                            logger.debug(f"Formatted datetime column: {col}")
+                        except Exception as e:
+                            logger.warning(f"Error formatting datetime column {col}: {e}")
+                            # If conversion fails, keep as string
+                            df[col] = df[col].astype(str)
             
             # Step 6: Format time columns
             if "time_columns" in config:

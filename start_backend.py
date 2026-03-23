@@ -71,11 +71,9 @@ def dashboard_summary():
                 ROUND(AVG(total), 2) as avg_order_value,
                 MIN(DATE(opened)) as earliest_date,
                 MAX(DATE(opened)) as latest_date,
-                COUNT(DISTINCT DATE(opened)) as unique_dates,
-                COUNT(CASE WHEN closure_indicator = TRUE THEN 1 END) as closure_days
+                COUNT(DISTINCT DATE(opened)) as unique_dates
             FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
-            WHERE total IS NOT NULL 
-            AND (closure_indicator IS NULL OR closure_indicator = FALSE)
+            WHERE total IS NOT NULL
             """
             
             result = bq_client.query(query).result()
@@ -86,8 +84,7 @@ def dashboard_summary():
                     'avg_order_value': row.avg_order_value,
                     'earliest_date': str(row.earliest_date) if row.earliest_date else None,
                     'latest_date': str(row.latest_date) if row.latest_date else None,
-                    'unique_dates': row.unique_dates,
-                    'closure_days': row.closure_days
+                    'unique_dates': row.unique_dates
                 }
         
         return jsonify({
@@ -108,10 +105,9 @@ def dashboard_summary():
 
 @app.route('/api/orders/recent', methods=['GET'])
 def recent_orders():
-    """Get recent orders data excluding closure records."""
+    """Get recent orders."""
     try:
-        limit = request.args.get('limit', 10, type=int)
-        
+        limit = request.args.get('limit', 5, type=int)
         query = f"""
         SELECT 
             order_id,
@@ -123,32 +119,27 @@ def recent_orders():
             service,
             guest_count
         FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
-        WHERE total > 0 
-        AND (closure_indicator IS NULL OR closure_indicator = FALSE)
+        WHERE order_id IS NOT NULL
         ORDER BY opened DESC
         LIMIT {limit}
         """
-        
         result = bq_client.query(query).result()
         orders = []
-        
         for row in result:
             orders.append({
                 'order_id': row.order_id,
                 'order_number': row.order_number,
                 'opened': str(row.opened),
                 'server': row.server,
-                'total': float(row.total) if row.total else 0,
+                'total': float(row.total),
                 'revenue_center': row.revenue_center,
                 'service': row.service,
                 'guest_count': row.guest_count
             })
-        
         return jsonify({
             'status': 'success',
             'data': orders
         }), 200
-        
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -157,7 +148,7 @@ def recent_orders():
 
 @app.route('/api/analytics/sales-by-service', methods=['GET'])
 def sales_by_service():
-    """Get sales breakdown by service type excluding closure records."""
+    """Get sales breakdown by service type."""
     try:
         query = f"""
         SELECT 
@@ -167,7 +158,6 @@ def sales_by_service():
             ROUND(AVG(total), 2) as avg_order_value
         FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
         WHERE service IS NOT NULL AND service != '' AND total > 0
-        AND (closure_indicator IS NULL OR closure_indicator = FALSE)
         GROUP BY service
         ORDER BY total_sales DESC
         """
@@ -196,7 +186,7 @@ def sales_by_service():
 
 @app.route('/api/analytics/top-servers', methods=['GET'])
 def top_servers():
-    """Get top servers by sales excluding closure records."""
+    """Get top servers by sales."""
     try:
         limit = request.args.get('limit', 10, type=int)
         
@@ -208,7 +198,6 @@ def top_servers():
             ROUND(AVG(total), 2) as avg_order_value
         FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
         WHERE server IS NOT NULL AND server != '' AND total > 0
-        AND (closure_indicator IS NULL OR closure_indicator = FALSE)
         GROUP BY server
         ORDER BY total_sales DESC
         LIMIT {limit}
@@ -240,59 +229,14 @@ def top_servers():
 def closure_summary():
     """Get business closure summary for operational insights."""
     try:
-        query = f"""
-        SELECT 
-            processing_date,
-            closure_reason,
-            COUNT(*) as closure_records,
-            COUNT(DISTINCT closure_reason) as unique_reasons
-        FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
-        WHERE closure_indicator = TRUE
-        GROUP BY processing_date, closure_reason
-        ORDER BY processing_date DESC
-        LIMIT 50
-        """
-        
-        result = bq_client.query(query).result()
-        closures = []
-        
-        for row in result:
-            closures.append({
-                'date': str(row.processing_date),
-                'reason': row.closure_reason,
-                'records': row.closure_records
-            })
-        
-        # Get closure pattern analysis
-        pattern_query = f"""
-        SELECT 
-            closure_reason,
-            COUNT(DISTINCT processing_date) as closure_days,
-            COUNT(*) as total_records
-        FROM `{PROJECT_ID}.{DATASET_ID}.order_details`
-        WHERE closure_indicator = TRUE
-        GROUP BY closure_reason
-        ORDER BY closure_days DESC
-        """
-        
-        pattern_result = bq_client.query(pattern_query).result()
-        patterns = []
-        
-        for row in pattern_result:
-            patterns.append({
-                'reason': row.closure_reason,
-                'closure_days': row.closure_days,
-                'total_records': row.total_records
-            })
-        
+        # Return empty closure summary since closure fields do not exist
         return jsonify({
             'status': 'success',
             'data': {
-                'recent_closures': closures,
-                'closure_patterns': patterns
+                'recent_closures': [],
+                'closure_patterns': []
             }
         }), 200
-        
     except Exception as e:
         return jsonify({
             'status': 'error',
