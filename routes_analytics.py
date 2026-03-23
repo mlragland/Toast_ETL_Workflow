@@ -640,7 +640,7 @@ def api_labor_analysis():
             COALESCE(SUM(gratuity), 0) AS gratuity,
             COUNT(DISTINCT order_id) AS order_count
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE processing_date BETWEEN @start_date AND @end_date
             AND (voided IS NULL OR voided = 'false')
         GROUP BY week_start ORDER BY week_start
         """
@@ -653,7 +653,7 @@ def api_labor_analysis():
             ROUND(SUM(abs_amount), 2) AS total,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
         GROUP BY week_start, category ORDER BY week_start
         """
@@ -666,7 +666,7 @@ def api_labor_analysis():
             COALESCE(SUM(tip), 0) AS tips,
             COALESCE(SUM(gratuity), 0) AS gratuity
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE processing_date BETWEEN @start_date AND @end_date
             AND (voided IS NULL OR voided = 'false')
         GROUP BY month ORDER BY month
         """
@@ -678,7 +678,7 @@ def api_labor_analysis():
             category,
             ROUND(SUM(abs_amount), 2) AS total
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
         GROUP BY month, category ORDER BY month
         """
@@ -690,17 +690,21 @@ def api_labor_analysis():
             ROUND(SUM(abs_amount), 2) AS total,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
             AND (LOWER(category) LIKE '%labor%' OR LOWER(category) LIKE '%payroll%')
         GROUP BY vendor ORDER BY total DESC
         """
 
-        rev_rows = list(bq.query(rev_sql).result())
-        exp_rows = list(bq.query(exp_sql).result())
-        mrev_rows = list(bq.query(mrev_sql).result())
-        mexp_rows = list(bq.query(mexp_sql).result())
-        vendor_rows = list(bq.query(vendor_sql).result())
+        date_params = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start_date", "STRING", start_date),
+            bigquery.ScalarQueryParameter("end_date", "STRING", end_date),
+        ])
+        rev_rows = list(bq.query(rev_sql, job_config=date_params).result())
+        exp_rows = list(bq.query(exp_sql, job_config=date_params).result())
+        mrev_rows = list(bq.query(mrev_sql, job_config=date_params).result())
+        mexp_rows = list(bq.query(mexp_sql, job_config=date_params).result())
+        vendor_rows = list(bq.query(vendor_sql, job_config=date_params).result())
 
         # Helper: sum categories matching keywords
         def _sum_match(cats: dict, keywords: list) -> float:
@@ -1757,6 +1761,10 @@ def api_kpi_benchmarks():
 
     def _run_period(bq_client, sd: str, ed: str):
         """Run all queries for a given date range and return computed metrics."""
+        period_params = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("sd", "STRING", sd),
+            bigquery.ScalarQueryParameter("ed", "STRING", ed),
+        ])
         # Q1: Revenue + Orders + Discounts from OrderDetails
         rev_q = f"""
         SELECT
@@ -1767,10 +1775,10 @@ def api_kpi_benchmarks():
             COUNT(DISTINCT processing_date) AS operating_days,
             COALESCE(SUM(discount_amount), 0) AS total_discounts
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN '{sd}' AND '{ed}'
+        WHERE processing_date BETWEEN @sd AND @ed
           AND (voided IS NULL OR voided = 'false')
         """
-        rev_row = list(bq_client.query(rev_q).result())[0]
+        rev_row = list(bq_client.query(rev_q, job_config=period_params).result())[0]
         net_sales = float(rev_row.net_sales or 0)
         total_tips = float(rev_row.total_tips or 0)
         total_grat = float(rev_row.total_gratuity or 0)
@@ -1792,10 +1800,10 @@ def api_kpi_benchmarks():
         void_q = f"""
         SELECT COALESCE(SUM(ABS(amount)), 0) AS voided_amount
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN '{sd}' AND '{ed}'
+        WHERE processing_date BETWEEN @sd AND @ed
           AND voided = 'true'
         """
-        void_row = list(bq_client.query(void_q).result())[0]
+        void_row = list(bq_client.query(void_q, job_config=period_params).result())[0]
         voided_amount = float(void_row.voided_amount or 0)
         gross_for_void = net_sales + voided_amount
         void_rate = round(voided_amount / gross_for_void * 100, 1) if gross_for_void > 0 else 0
@@ -1821,11 +1829,11 @@ def api_kpi_benchmarks():
             exp_q = f"""
             SELECT category, ROUND(SUM(abs_amount), 2) AS total
             FROM `{bank_table}`
-            WHERE transaction_date BETWEEN '{sd}' AND '{ed}'
+            WHERE transaction_date BETWEEN @sd AND @ed
               AND transaction_type = 'debit'
             GROUP BY category ORDER BY total DESC
             """
-            for row in bq_client.query(exp_q).result():
+            for row in bq_client.query(exp_q, job_config=period_params).result():
                 expenses[row.category] = float(row.total or 0)
 
             def sum_matching(exps, keywords):
@@ -1873,7 +1881,7 @@ def api_kpi_benchmarks():
             WHERE status IN ('CAPTURED','AUTHORIZED','CAPTURE_IN_PROGRESS')
               AND last_4_card_digits IS NOT NULL
               AND last_4_card_digits != ''
-              AND DATE(CAST(paid_date AS DATETIME)) BETWEEN '{sd}' AND '{ed}'
+              AND DATE(CAST(paid_date AS DATETIME)) BETWEEN @sd AND @ed
           ) WHERE _rn = 1
         ),
         cards AS (
@@ -1881,7 +1889,7 @@ def api_kpi_benchmarks():
             CONCAT(last_4_card_digits, '-', COALESCE(card_type, '')) AS ckey,
             COUNT(DISTINCT DATE(CAST(paid_date AS DATETIME))) AS visit_days,
             ROUND(SUM(amount), 2) AS total_spend,
-            DATE_DIFF(DATE '{ed}', MAX(DATE(CAST(paid_date AS DATETIME))), DAY) AS recency
+            DATE_DIFF(DATE @ed, MAX(DATE(CAST(paid_date AS DATETIME))), DAY) AS recency
           FROM deduped
           GROUP BY ckey
         )
@@ -1893,7 +1901,7 @@ def api_kpi_benchmarks():
           COUNTIF(visit_days >= 3 AND recency > 45 AND recency <= 90) AS at_risk_count
         FROM cards
         """
-        guest_row = list(bq_client.query(guest_q).result())[0]
+        guest_row = list(bq_client.query(guest_q, job_config=period_params).result())[0]
         total_guests = int(guest_row.total_guests or 0)
         repeat_guests = int(guest_row.repeat_guests or 0)
         total_guest_rev = float(guest_row.total_revenue or 0)
@@ -2226,6 +2234,10 @@ def api_budget():
 
     try:
         bq_client = bigquery.Client(project=PROJECT_ID)
+        date_params = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start_date", "STRING", start_date),
+            bigquery.ScalarQueryParameter("end_date", "STRING", end_date),
+        ])
 
         # --- Q1: Revenue for selected month ---
         rev_q = f"""
@@ -2235,10 +2247,10 @@ def api_budget():
             COALESCE(SUM(gratuity), 0) AS total_gratuity,
             COUNT(DISTINCT order_id) AS order_count
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE processing_date BETWEEN @start_date AND @end_date
             AND (voided IS NULL OR voided = 'false')
         """
-        rev_row = list(bq_client.query(rev_q).result())[0]
+        rev_row = list(bq_client.query(rev_q, job_config=date_params).result())[0]
         net_sales = float(rev_row.net_sales or 0)
         total_tips = float(rev_row.total_tips or 0)
         total_gratuity = float(rev_row.total_gratuity or 0)
@@ -2254,10 +2266,10 @@ def api_budget():
             COALESCE(SUM(CASE WHEN sales_category = 'Liquor' THEN CAST(net_price AS FLOAT64) ELSE 0 END), 0) AS liquor_rev,
             COALESCE(SUM(CAST(net_price AS FLOAT64)), 0) AS item_total
         FROM `{PROJECT_ID}.{DATASET_ID}.ItemSelectionDetails_raw`
-        WHERE processing_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE processing_date BETWEEN @start_date AND @end_date
             AND (voided IS NULL OR voided = 'false')
         """
-        rev_cat_row = list(bq_client.query(rev_cat_q).result())[0]
+        rev_cat_row = list(bq_client.query(rev_cat_q, job_config=date_params).result())[0]
         food_rev = round(float(rev_cat_row.food_rev or 0), 2)
         liquor_rev = round(float(rev_cat_row.liquor_rev or 0), 2)
 
@@ -2265,11 +2277,11 @@ def api_budget():
         hookah_bank_q = f"""
         SELECT COALESCE(SUM(amount), 0) AS hookah_rev
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND LOWER(category) LIKE '%hookah sales%'
             AND amount > 0
         """
-        hookah_row = list(bq_client.query(hookah_bank_q).result())[0]
+        hookah_row = list(bq_client.query(hookah_bank_q, job_config=date_params).result())[0]
         hookah_rev = round(float(hookah_row.hookah_rev or 0), 2)
         other_rev = round(max(net_sales - food_rev - liquor_rev, 0), 2)
         # Hookah is additive (bank deposits, not in Toast net_sales)
@@ -2281,12 +2293,12 @@ def api_budget():
             category,
             ROUND(SUM(abs_amount), 2) AS total
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
         GROUP BY category
         ORDER BY total DESC
         """
-        exp_rows = list(bq_client.query(exp_q).result())
+        exp_rows = list(bq_client.query(exp_q, job_config=date_params).result())
         expenses_by_cat: Dict[str, float] = {}
         for row in exp_rows:
             expenses_by_cat[row.category] = float(row.total or 0)
@@ -2312,12 +2324,12 @@ def api_budget():
             COUNT(*) AS txns
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
         WHERE transaction_type = 'debit'
-            AND transaction_date BETWEEN '{start_date}' AND '{end_date}'
+            AND transaction_date BETWEEN @start_date AND @end_date
         GROUP BY vendor_normalized, category
         ORDER BY total DESC
         LIMIT 50
         """
-        vendor_rows = list(bq_client.query(vendor_q).result())
+        vendor_rows = list(bq_client.query(vendor_q, job_config=date_params).result())
         top_vendors_raw = [
             {
                 "vendor": row.vendor_normalized or "Unknown",
@@ -2338,11 +2350,11 @@ def api_budget():
             vendor_normalized
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
         WHERE transaction_type = 'debit'
-            AND transaction_date BETWEEN '{start_date}' AND '{end_date}'
+            AND transaction_date BETWEEN @start_date AND @end_date
         ORDER BY abs_amount DESC
         LIMIT 500
         """
-        txn_rows = list(bq_client.query(txn_q).result())
+        txn_rows = list(bq_client.query(txn_q, job_config=date_params).result())
         all_txns = [
             {
                 "date": str(row.transaction_date),
@@ -2370,7 +2382,7 @@ def api_budget():
             COALESCE(SUM(tip), 0) AS tips,
             COALESCE(SUM(gratuity), 0) AS grat
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN '{hist_start}' AND '{hist_end}'
+        WHERE processing_date BETWEEN @hist_start AND @hist_end
             AND (voided IS NULL OR voided = 'false')
         GROUP BY month ORDER BY month
         """
@@ -2380,13 +2392,17 @@ def api_budget():
             category,
             ROUND(SUM(abs_amount), 2) AS total
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{hist_start}' AND '{hist_end}'
+        WHERE transaction_date BETWEEN @hist_start AND @hist_end
             AND transaction_type = 'debit'
         GROUP BY month, category
         ORDER BY month
         """
-        rev_hist_rows = list(bq_client.query(rev_hist_q).result())
-        exp_hist_rows = list(bq_client.query(exp_hist_q).result())
+        hist_params = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("hist_start", "STRING", hist_start),
+            bigquery.ScalarQueryParameter("hist_end", "STRING", hist_end),
+        ])
+        rev_hist_rows = list(bq_client.query(rev_hist_q, job_config=hist_params).result())
+        exp_hist_rows = list(bq_client.query(exp_hist_q, job_config=hist_params).result())
 
         # Build history by month
         rev_by_month: Dict[str, Dict] = {}
@@ -2845,11 +2861,15 @@ def api_budget_drilldown():
             category_source
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
         WHERE transaction_type = 'debit'
-            AND transaction_date BETWEEN '{start_date}' AND '{end_date}'
+            AND transaction_date BETWEEN @start_date AND @end_date
             AND {kw_where}
         ORDER BY abs_amount DESC
         """
-        rows = list(bq_client.query(q).result())
+        date_params = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start_date", "STRING", start_date),
+            bigquery.ScalarQueryParameter("end_date", "STRING", end_date),
+        ])
+        rows = list(bq_client.query(q, job_config=date_params).result())
         transactions = [
             {
                 "date": str(r.transaction_date),
@@ -2915,7 +2935,7 @@ def api_event_roi():
             COALESCE(SUM(tip), 0) AS tips,
             COALESCE(SUM(gratuity), 0) AS gratuity
         FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
-        WHERE {bd} BETWEEN '{start_date}' AND '{end_date}'
+        WHERE {bd} BETWEEN @start_date AND @end_date
             AND status IN ('CAPTURED', 'AUTHORIZED', 'CAPTURE_IN_PROGRESS')
             AND paid_date IS NOT NULL AND paid_date != ''
         GROUP BY month, dow_num, dow_name
@@ -2939,7 +2959,7 @@ def api_event_roi():
             ROUND(SUM(abs_amount), 2) AS total_amount,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
             AND ({direct_likes})
         GROUP BY month, vendor, category
@@ -2954,7 +2974,7 @@ def api_event_roi():
             ROUND(SUM(abs_amount), 2) AS total_amount,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
             AND ({shared_likes})
         GROUP BY month, category
@@ -2969,7 +2989,7 @@ def api_event_roi():
             ROUND(SUM(abs_amount), 2) AS total_amount,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
             AND ({direct_likes})
         GROUP BY vendor, category
@@ -2986,7 +3006,7 @@ def api_event_roi():
             LEFT(CAST(transaction_date AS STRING), 7) AS month,
             ROUND(SUM(abs_amount), 2) AS total_labor
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
             AND (LOWER(category) LIKE '%labor%' OR LOWER(category) LIKE '%payroll%')
             AND {ops_likes}
@@ -3005,19 +3025,23 @@ def api_event_roi():
             ROUND(SUM(abs_amount), 2) AS total_amount,
             category
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE transaction_date BETWEEN @start_date AND @end_date
             AND transaction_type = 'debit'
             AND ({ops_cat_likes})
         GROUP BY month, category
         ORDER BY month
         """
 
-        rev_rows = list(bq_client.query(q_revenue).result())
-        direct_rows = list(bq_client.query(q_direct).result())
-        shared_rows = list(bq_client.query(q_shared).result())
-        all_vendor_rows = list(bq_client.query(q_all_vendors).result())
-        labor_rows = list(bq_client.query(q_labor).result())
-        ops_labor_rows = list(bq_client.query(q_ops_labor).result())
+        date_params = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start_date", "STRING", start_date),
+            bigquery.ScalarQueryParameter("end_date", "STRING", end_date),
+        ])
+        rev_rows = list(bq_client.query(q_revenue, job_config=date_params).result())
+        direct_rows = list(bq_client.query(q_direct, job_config=date_params).result())
+        shared_rows = list(bq_client.query(q_shared, job_config=date_params).result())
+        all_vendor_rows = list(bq_client.query(q_all_vendors, job_config=date_params).result())
+        labor_rows = list(bq_client.query(q_labor, job_config=date_params).result())
+        ops_labor_rows = list(bq_client.query(q_ops_labor, job_config=date_params).result())
 
         # --- Step 1: Build revenue by event by month ---
         dow_to_event = {cfg["dow_num"]: key for key, cfg in RECURRING_EVENTS.items()}
@@ -3736,12 +3760,16 @@ def api_cash_recon():
             COALESCE(SUM(CAST(total AS FLOAT64)), 0) AS gross_total,
             COALESCE(SUM(CAST(v_mc_d_fees AS FLOAT64)), 0) AS card_fees
         FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
-        WHERE DATE(CAST(paid_date AS DATETIME)) BETWEEN '{start_date}' AND '{end_date}'
+        WHERE DATE(CAST(paid_date AS DATETIME)) BETWEEN @start_date AND @end_date
             AND status IN ('CAPTURED', 'AUTHORIZED', 'CAPTURE_IN_PROGRESS')
         GROUP BY month, status, pay_type
         ORDER BY month, pay_type, status
         """
-        pos_rows = list(bq_client.query(pos_query).result())
+        date_params = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start_date", "STRING", start_date),
+            bigquery.ScalarQueryParameter("end_date", "STRING", end_date),
+        ])
+        pos_rows = list(bq_client.query(pos_query, job_config=date_params).result())
 
         bank_table = f"{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw"
         has_bank = True
@@ -3766,7 +3794,7 @@ def api_cash_recon():
                 COALESCE(SUM(amount), 0) AS net_amount,
                 COUNT(*) AS txn_count
             FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-            WHERE CAST(transaction_date AS DATE) BETWEEN '{start_date}' AND '{end_date}'
+            WHERE CAST(transaction_date AS DATE) BETWEEN @start_date AND @end_date
                 AND (description LIKE '%Citizens%' OR description LIKE '%TOAST%'
                      OR description LIKE '%Toast%' OR description LIKE '%Counter Credit%'
                      OR (description LIKE 'Online Banking transfer from CHK 9121%' AND amount > 0))
@@ -3774,7 +3802,7 @@ def api_cash_recon():
             HAVING deposit_type IS NOT NULL
             ORDER BY month, deposit_type
             """
-            bank_rows = list(bq_client.query(bank_query).result())
+            bank_rows = list(bq_client.query(bank_query, job_config=date_params).result())
 
         all_months: set[str] = set()
         pos_data: dict[str, dict] = {}
@@ -3993,10 +4021,14 @@ def profit_summary():
             COALESCE(SUM(total), 0) as gross_revenue,
             COUNT(DISTINCT order_id) as order_count
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE processing_date BETWEEN @start_date AND @end_date
             AND (voided IS NULL OR voided = 'false')
         """
-        rev_row = list(bq_client.query(revenue_query).result())[0]
+        date_params = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start_date", "STRING", start_date),
+            bigquery.ScalarQueryParameter("end_date", "STRING", end_date),
+        ])
+        rev_row = list(bq_client.query(revenue_query, job_config=date_params).result())[0]
         net_sales = float(rev_row.net_sales or 0)
         gross_revenue = float(rev_row.gross_revenue or 0)
         total_tips = float(rev_row.total_tips or 0)
@@ -4013,9 +4045,9 @@ def profit_summary():
                          THEN total ELSE 0 END), 0) as cash_collected,
             COUNTIF(payment_type = 'Cash' OR payment_type LIKE '%CASH%') as cash_txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
-        WHERE processing_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE processing_date BETWEEN @start_date AND @end_date
         """
-        cash_row = list(bq_client.query(cash_query).result())[0]
+        cash_row = list(bq_client.query(cash_query, job_config=date_params).result())[0]
         cash_collected = float(cash_row.cash_collected or 0)
         cash_txn_count = int(cash_row.cash_txn_count or 0)
 
@@ -4028,9 +4060,9 @@ def profit_summary():
             COUNTIF(action = 'NO_SALE') as no_sale_count,
             COUNTIF(action = 'CLOSE_OUT_EXACT') as exact_closeouts
         FROM `{PROJECT_ID}.{DATASET_ID}.CashEntries_raw`
-        WHERE processing_date BETWEEN '{start_date}' AND '{end_date}'
+        WHERE processing_date BETWEEN @start_date AND @end_date
         """
-        drawer_row = list(bq_client.query(drawer_query).result())[0]
+        drawer_row = list(bq_client.query(drawer_query, job_config=date_params).result())[0]
         drawer_collected = float(drawer_row.drawer_collected or 0)
         drawer_payouts = float(drawer_row.payouts or 0)
         drawer_overages = float(drawer_row.overages or 0)
@@ -4055,12 +4087,12 @@ def profit_summary():
                 category,
                 ROUND(SUM(abs_amount), 2) as total
             FROM `{bank_table}`
-            WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+            WHERE transaction_date BETWEEN @start_date AND @end_date
                 AND transaction_type = 'debit'
             GROUP BY category
             ORDER BY total DESC
             """
-            expense_rows = list(bq_client.query(expense_query).result())
+            expense_rows = list(bq_client.query(expense_query, job_config=date_params).result())
             for row in expense_rows:
                 expenses_by_category[row.category] = float(row.total or 0)
             total_expenses = sum(
@@ -4072,13 +4104,13 @@ def profit_summary():
             SELECT
                 COALESCE(SUM(abs_amount), 0) as total_deposits
             FROM `{bank_table}`
-            WHERE transaction_date BETWEEN '{start_date}' AND '{end_date}'
+            WHERE transaction_date BETWEEN @start_date AND @end_date
                 AND transaction_type = 'credit'
                 AND (LOWER(category) LIKE '%cash deposit%'
                      OR LOWER(category) LIKE '%cash account transfer%'
                      OR LOWER(description) LIKE '%counter credit%')
             """
-            dep_row = list(bq_client.query(deposit_query).result())[0]
+            dep_row = list(bq_client.query(deposit_query, job_config=date_params).result())[0]
             cash_deposited = float(dep_row.total_deposits or 0)
 
         def sum_matching(expenses: Dict[str, float], keywords: List[str]) -> float:

@@ -1098,10 +1098,13 @@ class BigQueryLoader:
 
         delete_sql = f"""
         DELETE FROM `{table_ref}`
-        WHERE processing_date = '{processing_date}'
+        WHERE processing_date = @processing_date
         """
+        job_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("processing_date", "STRING", processing_date),
+        ])
 
-        query_job = self.client.query(delete_sql)
+        query_job = self.client.query(delete_sql, job_config=job_config)
         query_job.result()
         logger.info(f"Deleted existing data for {processing_date} from {table_loc}")
 
