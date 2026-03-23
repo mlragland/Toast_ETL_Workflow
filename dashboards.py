@@ -4837,3 +4837,157 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 </body>
 </html>'''
 
+
+
+def _flash_report_html() -> str:
+    """Daily Flash Report dashboard — KPIs, server leaderboard, margins, cash gap."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOV3 Daily Flash Report</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.nav-bar{display:flex;gap:0;background:#1a1a2e;padding:0 16px;flex-wrap:wrap}
+.nav-bar a{color:#94a3b8;text-decoration:none;padding:12px 16px;font-size:0.82rem;font-weight:500;transition:all 0.15s;border-bottom:2px solid transparent;white-space:nowrap}
+.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.nav-bar a.active{color:#fff;border-bottom-color:#f59e0b;background:rgba(245,158,11,0.1)}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+.header{text-align:center;padding:24px 0;background:linear-gradient(135deg,#f59e0b22,#d9770622);border-radius:12px;margin-bottom:24px}
+.header h1{font-size:1.6rem;color:#f59e0b}
+.header p{color:#94a3b8;font-size:0.9rem;margin-top:4px}
+.date-picker{display:flex;justify-content:center;gap:12px;margin:16px 0}
+.date-picker input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px 16px;border-radius:8px;font-size:0.9rem}
+.date-picker button{background:#f59e0b;color:#000;border:none;padding:8px 24px;border-radius:8px;font-weight:600;cursor:pointer}
+.date-picker button:hover{background:#d97706}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.kpi{background:#1e293b;border-radius:12px;padding:20px;text-align:center}
+.kpi .label{font-size:0.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em}
+.kpi .value{font-size:1.8rem;font-weight:700;margin:8px 0}
+.kpi .change{font-size:0.8rem;font-weight:600}
+.kpi .change.up{color:#22c55e}
+.kpi .change.down{color:#ef4444}
+.section{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:16px}
+.section h2{font-size:1rem;color:#f59e0b;margin-bottom:12px}
+.server-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #334155}
+.server-row:last-child{border:none}
+.server-rank{color:#94a3b8;width:30px}
+.server-name{flex:1;font-weight:500}
+.server-rev{color:#22c55e;font-weight:600}
+.margin-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #334155}
+.margin-row:last-child{border:none}
+.margin-label{color:#94a3b8}
+.margin-val{font-weight:600}
+.margin-val.good{color:#22c55e}
+.margin-val.warn{color:#f59e0b}
+.margin-val.bad{color:#ef4444}
+.cash-row{display:flex;justify-content:space-between;padding:10px 0}
+.loading{text-align:center;padding:40px;color:#94a3b8}
+@media(max-width:768px){.kpi-grid{grid-template-columns:1fr 1fr}.container{padding:12px}}
+</style>
+</head>
+<body>
+<div class="nav-bar">
+<a href="/bank-review">Bank Review</a><a href="/pnl">P&amp;L</a><a href="/analysis">Analysis</a>
+<a href="/cash-recon">Cash Recon</a><a href="/menu-mix">Menu Mix</a><a href="/servers">Servers</a>
+<a href="/kitchen">Kitchen</a><a href="/labor">Labor</a><a href="/menu-eng">Menu Eng</a>
+<a href="/events">Events</a><a href="/loyalty">Loyalty</a><a href="/kpi-benchmarks">KPI</a>
+<a href="/budget">Budget</a><a href="/event-roi">Event ROI</a>
+<a href="/flash" class="active">Flash</a>
+</div>
+<div class="container">
+<div class="header">
+<h1>🍴 Daily Flash Report</h1>
+<p id="subtitle">Loading...</p>
+<div class="date-picker">
+<input type="date" id="dateInput">
+<button onclick="loadReport()">Load</button>
+<button onclick="sendReport()" style="background:#3b82f6">📤 Send Slack + Email</button>
+</div>
+</div>
+
+<div id="content"><div class="loading">Loading flash report...</div></div>
+</div>
+
+<script>
+const API = '/api/flash-report';
+let currentData = null;
+
+function fmt(n){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n)}
+function pct(n){return n.toFixed(1)+'%'}
+function cls(val,goodMax,warnMax){return val<=goodMax?'good':val<=warnMax?'warn':'bad'}
+function clsMin(val,goodMin,warnMin){return val>=goodMin?'good':val>=warnMin?'warn':'bad'}
+
+async function loadReport(d){
+  const date = d || document.getElementById('dateInput').value;
+  const body = date ? JSON.stringify({date}) : '{}';
+  try {
+    const r = await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body});
+    const data = await r.json();
+    if(data.error){document.getElementById('content').innerHTML=`<div class="loading">Error: ${data.error}</div>`;return}
+    currentData = data;
+    render(data);
+  } catch(e){document.getElementById('content').innerHTML=`<div class="loading">Failed to load: ${e.message}</div>`}
+}
+
+async function sendReport(){
+  if(!currentData)return;
+  const body = JSON.stringify({date:currentData.date});
+  await fetch(API+'?send=true',{method:'POST',headers:{'Content-Type':'application/json'},body});
+  alert('Flash report sent to Slack + Email!');
+}
+
+function render(d){
+  const c = d.comparison;
+  const arrow = c.revenue_change_pct >= 0 ? '↑' : '↓';
+  const chgCls = c.revenue_change_pct >= 0 ? 'up' : 'down';
+
+  document.getElementById('subtitle').textContent = `${d.day_name} ${d.date}`;
+  document.getElementById('dateInput').value = d.date;
+
+  let servers = '';
+  (d.top_servers||[]).forEach((s,i) => {
+    servers += `<div class="server-row"><span class="server-rank">#${i+1}</span><span class="server-name">${s.server}</span><span class="server-rev">${fmt(s.revenue)}</span></div>`;
+  });
+
+  const m = d.margins;
+  const cash = d.cash;
+
+  document.getElementById('content').innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi"><div class="label">💰 Revenue</div><div class="value">${fmt(d.revenue)}</div><div class="change ${chgCls}">${arrow}${Math.abs(c.revenue_change_pct).toFixed(0)}% vs last ${d.day_name.slice(0,3)}</div></div>
+      <div class="kpi"><div class="label">📋 Orders</div><div class="value">${d.orders}</div><div class="change" style="color:#94a3b8">Prior: ${c.prior_orders}</div></div>
+      <div class="kpi"><div class="label">👥 Guests</div><div class="value">${d.guests}</div><div class="change" style="color:#94a3b8">Prior: ${c.prior_guests}</div></div>
+      <div class="kpi"><div class="label">💳 Avg Check</div><div class="value">${fmt(d.avg_check)}</div><div class="change" style="color:#94a3b8">Tips: ${fmt(d.tips)}</div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="section">
+        <h2>🏆 Top Servers</h2>
+        ${servers || '<div style="color:#94a3b8">No server data</div>'}
+      </div>
+      <div class="section">
+        <h2>📊 Margins</h2>
+        <div class="margin-row"><span class="margin-label">COGS %</span><span class="margin-val ${cls(m.cogs_pct,30,35)}">${pct(m.cogs_pct)}</span></div>
+        <div class="margin-row"><span class="margin-label">True Labor %</span><span class="margin-val ${cls(m.labor_pct,28,33)}">${pct(m.labor_pct)}</span></div>
+        <div class="margin-row"><span class="margin-label">Net Margin</span><span class="margin-val ${clsMin(m.net_pct,12,5)}">${pct(m.net_pct)}</span></div>
+        <div class="margin-row"><span class="margin-label">Adj Revenue</span><span class="margin-val" style="color:#e2e8f0">${fmt(m.adj_revenue||0)}</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>💵 Cash Reconciliation</h2>
+      <div class="cash-row"><span>POS Cash Collected</span><span style="color:#22c55e;font-weight:600">${fmt(cash.collected)}</span></div>
+      <div class="cash-row"><span>Bank Cash Deposited</span><span style="color:#3b82f6;font-weight:600">${fmt(cash.deposited)}</span></div>
+      <div class="cash-row"><span>Gap</span><span class="margin-val ${Math.abs(cash.gap)<100?'good':Math.abs(cash.gap)<500?'warn':'bad'}">${fmt(cash.gap)}</span></div>
+    </div>
+  `;
+}
+
+// Auto-load yesterday on page load
+loadReport();
+</script>
+</body>
+</html>"""

@@ -7,7 +7,7 @@ from dashboards import (
     _cash_recon_html, _menu_mix_html, _events_calendar_html,
     _customer_loyalty_html, _server_performance_html, _kitchen_speed_html,
     _labor_dashboard_html, _menu_engineering_html, _kpi_benchmarks_html,
-    _budget_html, _event_roi_html,
+    _budget_html, _event_roi_html, _flash_report_html,
 )
 
 bp = Blueprint("dashboards", __name__)
@@ -88,3 +88,9 @@ def budget_page():
 @bp.route("/event-roi", methods=["GET"])
 def event_roi_page():
     return Response(_event_roi_html(), mimetype="text/html")
+
+
+@bp.route("/flash", methods=["GET"])
+def flash_report_page():
+    """Daily Flash Report dashboard."""
+    return Response(_flash_report_html(), mimetype="text/html")

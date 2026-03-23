@@ -4495,3 +4495,46 @@ def reconcile_checks():
     except Exception as e:
         logger.error(f"Check reconciliation failed: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ─── Daily Flash Report API ──────────────────────────────────────────────────
+
+@bp.route("/api/flash-report", methods=["POST"])
+def api_flash_report():
+    """
+    Daily flash report — yesterday's key metrics at a glance.
+
+    Request body (optional):
+        {"date": "2026-03-22"}  // defaults to yesterday
+
+    Returns revenue, orders, guests, avg check, top servers, expenses,
+    margins, cash gap, and comparison to same day last week.
+
+    Also sends Slack + email if ?send=true query param is set.
+    """
+    import re
+    data = request.get_json(silent=True) or {}
+    report_date = data.get("date")
+
+    # Validate date format if provided
+    if report_date:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", report_date):
+            return jsonify({"error": f"Invalid date format: {report_date}. Use YYYY-MM-DD"}), 400
+
+    try:
+        from flash_report import FlashReport
+        fr = FlashReport()
+        report_data = fr.collect(report_date)
+        result = fr.format_json(report_data)
+
+        # Send notifications if requested
+        if request.args.get("send") == "true":
+            fr.send_slack(report_data)
+            fr.send_email(report_data)
+            result["notifications"] = {"slack": True, "email": True}
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Flash report error: {e}")
+        return jsonify({"error": str(e)}), 500
