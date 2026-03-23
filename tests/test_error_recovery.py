@@ -148,3 +148,45 @@ class TestAnalyticsAPIMalformedInput:
             content_type="application/json",
         )
         assert resp.status_code == 400
+
+
+class TestDateInputValidation:
+    """Date format validation on analytics endpoints."""
+
+    def test_profit_summary_invalid_date_format(self, client):
+        """Invalid date format returns 400."""
+        resp = client.post(
+            "/profit-summary",
+            data=json.dumps({"start_date": "not-a-date", "end_date": "2026-03-31"}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+        data = json.loads(resp.data)
+        assert "Invalid" in data["error"]
+
+    def test_profit_summary_start_after_end(self, client):
+        """start_date after end_date returns 400."""
+        resp = client.post(
+            "/profit-summary",
+            data=json.dumps({"start_date": "2026-12-01", "end_date": "2026-01-01"}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+    def test_comprehensive_analysis_invalid_format(self, client):
+        """Invalid date format on comprehensive-analysis returns 400."""
+        resp = client.post(
+            "/comprehensive-analysis",
+            data=json.dumps({"start_date": "01/01/2026", "end_date": "03/31/2026"}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400
+
+    def test_profit_summary_missing_end_date(self, client):
+        """Missing end_date returns 400."""
+        resp = client.post(
+            "/profit-summary",
+            data=json.dumps({"start_date": "2026-01-01"}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 400

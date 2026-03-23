@@ -34,6 +34,39 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("analytics", __name__)
 
 
+# ─── Validation helpers ──────────────────────────────────────────────────────
+
+import re
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_date_range(data: dict) -> Optional[tuple]:
+    """Validate start_date and end_date from request body.
+
+    Returns (start_date, end_date) if valid, or a (jsonify, status_code) error tuple.
+    """
+    if not data:
+        return jsonify({"error": "Request body required with start_date and end_date"}), 400
+
+    start_date = data.get("start_date", "")
+    end_date = data.get("end_date", "")
+
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date are required (YYYY-MM-DD)"}), 400
+
+    if not _DATE_RE.match(start_date):
+        return jsonify({"error": f"Invalid start_date format: {start_date}. Use YYYY-MM-DD"}), 400
+
+    if not _DATE_RE.match(end_date):
+        return jsonify({"error": f"Invalid end_date format: {end_date}. Use YYYY-MM-DD"}), 400
+
+    if start_date > end_date:
+        return jsonify({"error": "start_date must be before or equal to end_date"}), 400
+
+    return start_date, end_date
+
+
 # ─── Helper functions ────────────────────────────────────────────────────────
 
 def _compute_event_insights(
@@ -4003,11 +4036,10 @@ def profit_summary():
     (from BankTransactions), COGS %, labor %, and net profit margin.
     """
     data = request.get_json()
-    if not data or "start_date" not in data or "end_date" not in data:
-        return jsonify({"error": "start_date and end_date required (YYYY-MM-DD)"}), 400
-
-    start_date = data["start_date"]
-    end_date = data["end_date"]
+    result = _validate_date_range(data)
+    if not isinstance(result, tuple) or len(result) != 2 or not isinstance(result[0], str):
+        return result  # error response
+    start_date, end_date = result
 
     try:
         bq_client = bigquery.Client(project=PROJECT_ID)
@@ -4208,11 +4240,10 @@ def comprehensive_analysis():
     Full financial analysis combining Toast POS + BofA bank data.
     """
     data = request.get_json()
-    if not data or "start_date" not in data or "end_date" not in data:
-        return jsonify({"error": "start_date and end_date required (YYYY-MM-DD)"}), 400
-
-    start_date = data["start_date"]
-    end_date = data["end_date"]
+    result = _validate_date_range(data)
+    if not isinstance(result, tuple) or len(result) != 2 or not isinstance(result[0], str):
+        return result  # error response
+    start_date, end_date = result
 
     try:
         report = WeeklyReportGenerator()

@@ -1,13 +1,15 @@
-"""Integration tests for ETL routes — health, run, backfill, status."""
+"""Integration tests for ETL routes — health, run, backfill, status, auth."""
 
 import json
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
+AUTH_HEADERS = {"Authorization": "Bearer test-token"}
+
 
 class TestHealthEndpoint:
-    """GET / health check."""
+    """GET / health check — no auth required."""
 
     def test_returns_healthy(self, client):
         resp = client.get("/")
@@ -17,8 +19,75 @@ class TestHealthEndpoint:
         assert data["service"] == "toast-etl-pipeline"
 
 
+class TestAuthMiddleware:
+    """POST routes require authentication."""
+
+    def test_run_without_auth_returns_401(self, client):
+        """POST /run without auth header returns 401."""
+        resp = client.post("/run", content_type="application/json")
+        assert resp.status_code == 401
+
+    def test_backfill_without_auth_returns_401(self, client):
+        """POST /backfill without auth header returns 401."""
+        resp = client.post(
+            "/backfill",
+            data=json.dumps({"start_date": "20260101", "end_date": "20260301"}),
+            content_type="application/json",
+        )
+        assert resp.status_code == 401
+
+    def test_weekly_report_without_auth_returns_401(self, client):
+        """POST /weekly-report without auth header returns 401."""
+        resp = client.post("/weekly-report", content_type="application/json")
+        assert resp.status_code == 401
+
+    def test_run_with_bearer_token_passes(self, client):
+        """POST /run with Bearer token passes auth."""
+        with patch("routes_etl.ToastPipeline") as mock_cls:
+            mock_summary = MagicMock()
+            mock_summary.run_id = "test"
+            mock_summary.status = "success"
+            mock_summary.processing_date = "20260322"
+            mock_summary.files_processed = 0
+            mock_summary.files_failed = 0
+            mock_summary.total_rows = 0
+            mock_summary.start_time = datetime(2026, 3, 22, 6, 0)
+            mock_summary.end_time = datetime(2026, 3, 22, 6, 1)
+            mock_summary.errors = []
+            mock_cls.return_value.run.return_value = mock_summary
+
+            resp = client.post(
+                "/run",
+                headers=AUTH_HEADERS,
+                content_type="application/json",
+            )
+            assert resp.status_code == 200
+
+    def test_run_with_scheduler_header_passes(self, client):
+        """POST /run with X-Scheduler-Source passes auth."""
+        with patch("routes_etl.ToastPipeline") as mock_cls:
+            mock_summary = MagicMock()
+            mock_summary.run_id = "test"
+            mock_summary.status = "success"
+            mock_summary.processing_date = "20260322"
+            mock_summary.files_processed = 0
+            mock_summary.files_failed = 0
+            mock_summary.total_rows = 0
+            mock_summary.start_time = datetime(2026, 3, 22, 6, 0)
+            mock_summary.end_time = datetime(2026, 3, 22, 6, 1)
+            mock_summary.errors = []
+            mock_cls.return_value.run.return_value = mock_summary
+
+            resp = client.post(
+                "/run",
+                headers={"X-Scheduler-Source": "cloud-scheduler"},
+                content_type="application/json",
+            )
+            assert resp.status_code == 200
+
+
 class TestRunEndpoint:
-    """POST /run — pipeline trigger."""
+    """POST /run — pipeline trigger (with auth)."""
 
     @patch("routes_etl.ToastPipeline")
     def test_successful_run(self, mock_cls, client):
@@ -37,6 +106,7 @@ class TestRunEndpoint:
 
         resp = client.post(
             "/run",
+            headers=AUTH_HEADERS,
             data=json.dumps({"processing_date": "20260322"}),
             content_type="application/json",
         )
@@ -47,12 +117,13 @@ class TestRunEndpoint:
 
 
 class TestBackfillEndpoint:
-    """POST /backfill — historical data backfill."""
+    """POST /backfill — historical data backfill (with auth)."""
 
     def test_missing_dates_returns_400(self, client):
         """Backfill without required dates returns 400."""
         resp = client.post(
             "/backfill",
+            headers=AUTH_HEADERS,
             data=json.dumps({}),
             content_type="application/json",
         )
@@ -62,6 +133,7 @@ class TestBackfillEndpoint:
         """start_date after end_date returns 400."""
         resp = client.post(
             "/backfill",
+            headers=AUTH_HEADERS,
             data=json.dumps({"start_date": "20260301", "end_date": "20260101"}),
             content_type="application/json",
         )
@@ -69,11 +141,10 @@ class TestBackfillEndpoint:
 
 
 class TestStatusEndpoint:
-    """GET /status/<table> — table status."""
+    """GET /status/<table> — table status (no auth required)."""
 
     @patch("routes_etl.bigquery.Client")
     def test_valid_table_returns_info(self, mock_bq_class, client):
-        """Known table returns row count and metadata."""
         mock_client = MagicMock()
         mock_table = MagicMock()
         mock_table.num_rows = 5000
@@ -81,7 +152,6 @@ class TestStatusEndpoint:
         mock_table.modified = datetime(2026, 3, 22, 10, 0, 0)
         mock_client.get_table.return_value = mock_table
 
-        # Mock the query result for latest_date and total_rows
         mock_query_result = MagicMock()
         mock_query_result.result.return_value = [
             SimpleNamespace(latest_date="2026-03-22", total_rows=5000)
@@ -96,7 +166,6 @@ class TestStatusEndpoint:
 
     @patch("routes_etl.bigquery.Client")
     def test_unknown_table_returns_404(self, mock_bq_class, client):
-        """Unknown table returns 404."""
         from google.cloud.exceptions import NotFound
         mock_client = MagicMock()
         mock_client.get_table.side_effect = NotFound("Table not found")

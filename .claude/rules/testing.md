@@ -1,6 +1,6 @@
 # Testing Standards — Toast ETL Pipeline
 
-## Current Score: 25/40 (Grade B) — up from 3/40
+## Current Score: 27/40 (Grade B) — up from 3/40
 | Category | Score | Notes |
 |----------|-------|-------|
 | Smoke Tests | 3 | 5 smoke tests: health, 14 dashboards, 404 |

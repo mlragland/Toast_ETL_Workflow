@@ -19,9 +19,10 @@
 
 ## BigQuery Safety
 - NEVER add `DROP TABLE` or `DELETE` without a `WHERE` clause
-- Several routes build SQL with f-strings using user-supplied dates — always validate `YYYY-MM-DD` format before interpolating
-- Prefer parameterized queries for any new endpoints
+- ALL date parameters in SQL queries MUST use `bigquery.ScalarQueryParameter` — never f-string interpolation
+- New endpoints: use `_validate_date_range()` from routes_analytics.py for date validation
 - Bank transaction deletion uses row-level DML, not table drops
+- `require_auth` decorator required on all POST routes in routes_etl.py
 
 ## Security
 - NEVER commit secrets (API keys, webhook URLs, Sheet IDs, service account emails) to source files

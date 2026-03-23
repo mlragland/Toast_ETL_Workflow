@@ -1,7 +1,9 @@
 """ETL routes: health check, pipeline run, backfill, table status, weekly report."""
 
+import os
 import logging
 from datetime import datetime
+from functools import wraps
 
 from flask import Blueprint, request, jsonify
 from google.cloud import bigquery
@@ -16,6 +18,36 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("etl", __name__)
 
 
+def require_auth(f):
+    """Require authentication for data-mutating endpoints.
+
+    Accepts requests with:
+    - Authorization: Bearer <token> (Cloud Scheduler OIDC)
+    - X-Scheduler-Source header (Cloud Scheduler)
+    - X-Admin-Key matching ADMIN_API_KEY env var
+
+    In production, Cloud Run IAM provides the outer auth layer.
+    This middleware adds defense-in-depth for POST routes.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get("Authorization", "")
+        scheduler = request.headers.get("X-Scheduler-Source", "")
+        admin_key = request.headers.get("X-Admin-Key", "")
+        expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+        if auth_header.startswith("Bearer "):
+            return f(*args, **kwargs)
+        if scheduler:
+            return f(*args, **kwargs)
+        if expected_key and admin_key == expected_key:
+            return f(*args, **kwargs)
+
+        logger.warning(f"Unauthorized POST attempt: {request.path} from {request.remote_addr}")
+        return jsonify({"error": "Authentication required"}), 401
+    return decorated
+
+
 @bp.route("/", methods=["GET"])
 def health():
     """Health check endpoint"""
@@ -23,6 +55,7 @@ def health():
 
 
 @bp.route("/run", methods=["POST"])
+@require_auth
 def run_pipeline():
     """
     Trigger pipeline run
@@ -54,6 +87,7 @@ def run_pipeline():
 
 
 @bp.route("/backfill", methods=["POST"])
+@require_auth
 def backfill():
     """
     Backfill historical data
@@ -118,6 +152,7 @@ def table_status(table_loc: str):
 
 
 @bp.route("/weekly-report", methods=["POST"])
+@require_auth
 def weekly_report():
     """
     Generate and send weekly summary report
