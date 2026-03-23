@@ -4991,3 +4991,162 @@ loadReport();
 </script>
 </body>
 </html>"""
+
+
+def _vendor_tracker_html() -> str:
+    """Vendor Spend Tracker dashboard — top vendors, trends, anomalies."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LOV3 Vendor Spend Tracker</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.nav-bar{display:flex;gap:0;background:#1a1a2e;padding:0 16px;flex-wrap:wrap}
+.nav-bar a{color:#94a3b8;text-decoration:none;padding:12px 16px;font-size:0.82rem;font-weight:500;transition:all 0.15s;border-bottom:2px solid transparent;white-space:nowrap}
+.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.nav-bar a.active{color:#fff;border-bottom-color:#8b5cf6;background:rgba(139,92,246,0.1)}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+.header{text-align:center;padding:24px 0;background:linear-gradient(135deg,#8b5cf622,#6d28d922);border-radius:12px;margin-bottom:24px}
+.header h1{font-size:1.6rem;color:#a78bfa}
+.header p{color:#94a3b8;font-size:0.9rem;margin-top:4px}
+.filter-bar{display:flex;justify-content:center;gap:12px;margin:16px 0;flex-wrap:wrap}
+.filter-bar input,.filter-bar select{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px 16px;border-radius:8px;font-size:0.9rem}
+.filter-bar button{background:#8b5cf6;color:#fff;border:none;padding:8px 24px;border-radius:8px;font-weight:600;cursor:pointer}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.kpi{background:#1e293b;border-radius:12px;padding:20px;text-align:center}
+.kpi .label{font-size:0.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em}
+.kpi .value{font-size:1.8rem;font-weight:700;margin:8px 0;color:#a78bfa}
+.section{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:16px}
+.section h2{font-size:1rem;color:#a78bfa;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:0.85rem}
+th{text-align:left;color:#94a3b8;padding:8px 12px;border-bottom:1px solid #334155;font-weight:500;cursor:pointer}
+th:hover{color:#a78bfa}
+td{padding:8px 12px;border-bottom:1px solid #1e293b}
+tr:hover{background:#1e293b88}
+.spend-bar{height:6px;background:#334155;border-radius:3px;overflow:hidden;margin-top:4px}
+.spend-bar .fill{height:100%;background:linear-gradient(90deg,#8b5cf6,#a78bfa);border-radius:3px}
+.anomaly{background:#7f1d1d22;border:1px solid #991b1b;border-radius:8px;padding:12px;margin-bottom:8px}
+.anomaly.medium{background:#78350f22;border-color:#92400e}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:600}
+.badge.high{background:#991b1b;color:#fca5a5}
+.badge.medium{background:#92400e;color:#fcd34d}
+.loading{text-align:center;padding:40px;color:#94a3b8}
+@media(max-width:768px){.kpi-grid{grid-template-columns:1fr 1fr}.container{padding:12px}}
+</style>
+</head>
+<body>
+<div class="nav-bar">
+<a href="/bank-review">Bank Review</a><a href="/pnl">P&amp;L</a><a href="/analysis">Analysis</a>
+<a href="/cash-recon">Cash Recon</a><a href="/menu-mix">Menu Mix</a><a href="/servers">Servers</a>
+<a href="/kitchen">Kitchen</a><a href="/labor">Labor</a><a href="/menu-eng">Menu Eng</a>
+<a href="/events">Events</a><a href="/loyalty">Loyalty</a><a href="/kpi-benchmarks">KPI</a>
+<a href="/budget">Budget</a><a href="/event-roi">Event ROI</a><a href="/flash">Flash</a>
+<a href="/vendors" class="active">Vendors</a>
+</div>
+<div class="container">
+<div class="header">
+<h1>🏢 Vendor Spend Tracker</h1>
+<p>Top vendors by spend, month-over-month trends, and cost anomalies</p>
+<div class="filter-bar">
+<input type="date" id="startDate" value="2025-09-01">
+<input type="date" id="endDate" value="">
+<button onclick="loadData()">Analyze</button>
+</div>
+</div>
+
+<div id="content"><div class="loading">Loading vendor data...</div></div>
+</div>
+
+<script>
+const API='/api/vendor-tracker';
+document.getElementById('endDate').value=new Date().toISOString().split('T')[0];
+
+function fmt(n){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n)}
+
+async function loadData(){
+  const s=document.getElementById('startDate').value;
+  const e=document.getElementById('endDate').value;
+  try{
+    const r=await fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:s,end_date:e})});
+    const d=await r.json();
+    if(d.error){document.getElementById('content').innerHTML=`<div class="loading">Error: ${d.error}</div>`;return}
+    render(d);
+  }catch(e){document.getElementById('content').innerHTML=`<div class="loading">Failed: ${e.message}</div>`}
+}
+
+function render(d){
+  const k=d.kpis;const c=d.concentration;
+  const maxSpend=d.top_vendors.length?d.top_vendors[0].total_spend:1;
+
+  let vendorRows='';
+  d.top_vendors.forEach((v,i)=>{
+    const pct=(v.total_spend/maxSpend*100).toFixed(0);
+    vendorRows+=`<tr>
+      <td style="color:#94a3b8">${i+1}</td>
+      <td><strong>${v.vendor}</strong><div class="spend-bar"><div class="fill" style="width:${pct}%"></div></div></td>
+      <td style="font-size:0.75rem;color:#94a3b8">${v.category_section}</td>
+      <td style="color:#a78bfa;font-weight:600;text-align:right">${fmt(v.total_spend)}</td>
+      <td style="text-align:right">${v.txn_count}</td>
+      <td style="text-align:right">${fmt(v.avg_per_txn)}</td>
+      <td style="text-align:right;color:#94a3b8">${v.active_months}mo</td>
+    </tr>`;
+  });
+
+  let anomalyCards='';
+  if(d.anomalies.length===0)anomalyCards='<div style="color:#94a3b8;padding:12px">No anomalies detected — vendor spending is stable.</div>';
+  d.anomalies.forEach(a=>{
+    anomalyCards+=`<div class="anomaly ${a.severity}">
+      <span class="badge ${a.severity}">${a.severity.toUpperCase()}</span>
+      <strong>${a.vendor}</strong> — ${a.month}: ${fmt(a.current_spend)} (was ${fmt(a.prior_spend)}, <strong>+${a.change_pct}%</strong>)
+    </div>`;
+  });
+
+  let catRows='';
+  d.category_breakdown.forEach(c=>{
+    catRows+=`<tr><td>${c.section}</td><td style="color:#a78bfa;font-weight:600;text-align:right">${fmt(c.total_spend)}</td><td style="text-align:right">${c.vendor_count}</td><td style="text-align:right">${c.txn_count}</td></tr>`;
+  });
+
+  document.getElementById('content').innerHTML=`
+    <div class="kpi-grid">
+      <div class="kpi"><div class="label">Total Spend</div><div class="value">${fmt(k.total_spend)}</div></div>
+      <div class="kpi"><div class="label">Active Vendors</div><div class="value">${k.total_vendors}</div></div>
+      <div class="kpi"><div class="label">Top 5 Concentration</div><div class="value">${c.top_5_pct}%</div></div>
+      <div class="kpi"><div class="label">⚠️ Anomalies</div><div class="value" style="color:${k.anomaly_count>0?'#f59e0b':'#22c55e'}">${k.anomaly_count}</div></div>
+    </div>
+
+    ${d.anomalies.length?`<div class="section"><h2>⚠️ Spend Anomalies (>25% MoM increase)</h2>${anomalyCards}</div>`:''}
+
+    <div class="section">
+      <h2>🏢 Top ${d.top_vendors.length} Vendors by Spend</h2>
+      <table>
+        <tr><th>#</th><th>Vendor</th><th>Category</th><th style="text-align:right">Total Spend</th><th style="text-align:right">Txns</th><th style="text-align:right">Avg/Txn</th><th style="text-align:right">Active</th></tr>
+        ${vendorRows}
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>📊 Spend by Category</h2>
+      <table>
+        <tr><th>Category</th><th style="text-align:right">Total Spend</th><th style="text-align:right">Vendors</th><th style="text-align:right">Transactions</th></tr>
+        ${catRows}
+      </table>
+    </div>
+
+    <div class="section" style="font-size:0.85rem;color:#94a3b8">
+      <h2>📈 Vendor Concentration</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:12px">
+        <div>Top 5 vendors: <strong style="color:#a78bfa">${c.top_5_pct}%</strong> of spend</div>
+        <div>Top 10 vendors: <strong style="color:#a78bfa">${c.top_10_pct}%</strong> of spend</div>
+        <div>Top 20 vendors: <strong style="color:#a78bfa">${c.top_20_pct}%</strong> of spend</div>
+      </div>
+    </div>
+  `;
+}
+
+loadData();
+</script>
+</body>
+</html>"""

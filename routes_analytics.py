@@ -4538,3 +4538,43 @@ def api_flash_report():
     except Exception as e:
         logger.error(f"Flash report error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ─── Vendor Spend Tracker API ────────────────────────────────────────────────
+
+@bp.route("/api/vendor-tracker", methods=["POST"])
+def api_vendor_tracker():
+    """
+    Vendor spend analysis — top vendors, trends, concentration, anomalies.
+
+    Request body:
+        {"start_date": "2025-09-01", "end_date": "2026-02-28", "limit": 30}
+    """
+    import re
+    data = request.get_json() or {}
+
+    start_date = data.get("start_date", "")
+    end_date = data.get("end_date", "")
+    limit = min(int(data.get("limit", 30)), 100)
+
+    if not start_date or not end_date:
+        return jsonify({"error": "start_date and end_date required (YYYY-MM-DD)"}), 400
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_date) or not re.match(r"^\d{4}-\d{2}-\d{2}$", end_date):
+        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+    # Check cache
+    ck = _cache_key("vendor_tracker", {"start_date": start_date, "end_date": end_date, "limit": limit})
+    cached = _cache_get(ck)
+    if cached is not None:
+        return jsonify(cached)
+
+    try:
+        from vendor_tracker import VendorTracker
+        vt = VendorTracker()
+        result = vt.collect(start_date, end_date, limit)
+        _cache_set(ck, result)
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Vendor tracker error: {e}")
+        return jsonify({"error": str(e)}), 500
