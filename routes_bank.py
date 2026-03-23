@@ -464,7 +464,32 @@ def api_bank_transactions_categorize():
                 ]
             )
             result = bq_client.query(update_sql, job_config=job_cfg).result()
-            updated += result.num_dml_affected_rows or 0
+            affected = result.num_dml_affected_rows or 0
+            updated += affected
+
+            # Audit trail — log the categorization change
+            if affected > 0:
+                audit_sql = f"""
+                INSERT INTO `{PROJECT_ID}.{DATASET_ID}.BankTransactions_audit`
+                (transaction_date, description, amount, old_category, new_category,
+                 vendor_normalized, changed_at, source)
+                VALUES (@txn_date, @desc, @amount, @old_cat, @new_cat,
+                        @vendor, CURRENT_TIMESTAMP(), 'manual')
+                """
+                old_cat = item.get("old_category", "")
+                audit_cfg = bigquery.QueryJobConfig(query_parameters=[
+                    bigquery.ScalarQueryParameter("txn_date", "STRING", txn_date),
+                    bigquery.ScalarQueryParameter("desc", "STRING", desc),
+                    bigquery.ScalarQueryParameter("amount", "FLOAT64", float(amount)),
+                    bigquery.ScalarQueryParameter("old_cat", "STRING", old_cat),
+                    bigquery.ScalarQueryParameter("new_cat", "STRING", new_cat),
+                    bigquery.ScalarQueryParameter("vendor", "STRING", vendor),
+                ])
+                try:
+                    bq_client.query(audit_sql, job_config=audit_cfg).result()
+                except Exception as audit_err:
+                    # Audit failure should not block categorization
+                    logger.warning(f"Audit log failed: {audit_err}")
 
             # Optionally create a rule
             if item.get("create_rule") and item.get("rule_keyword"):

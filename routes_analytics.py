@@ -34,6 +34,43 @@ logger = logging.getLogger(__name__)
 bp = Blueprint("analytics", __name__)
 
 
+# ─── In-memory cache for analytics queries ───────────────────────────────────
+# Simple TTL cache to avoid redundant BigQuery calls for the same date range.
+# Cloud Run instances are ephemeral — cache lives only for the instance lifetime.
+# No shared state between instances. No external dependency (no Redis needed).
+
+import hashlib as _hashlib
+import time as _time
+
+_CACHE: Dict[str, Any] = {}
+_CACHE_TTL = 900  # 15 minutes
+
+
+def _cache_key(endpoint: str, params: dict) -> str:
+    """Generate a deterministic cache key from endpoint + params."""
+    raw = f"{endpoint}:{json.dumps(params, sort_keys=True)}"
+    return _hashlib.md5(raw.encode()).hexdigest()
+
+
+def _cache_get(key: str) -> Optional[Any]:
+    """Get cached value if not expired."""
+    entry = _CACHE.get(key)
+    if entry and _time.time() - entry["ts"] < _CACHE_TTL:
+        return entry["data"]
+    return None
+
+
+def _cache_set(key: str, data: Any):
+    """Store value in cache with current timestamp."""
+    # Evict old entries if cache grows too large (>100 entries)
+    if len(_CACHE) > 100:
+        cutoff = _time.time() - _CACHE_TTL
+        expired = [k for k, v in _CACHE.items() if v["ts"] < cutoff]
+        for k in expired:
+            del _CACHE[k]
+    _CACHE[key] = {"data": data, "ts": _time.time()}
+
+
 # ─── Validation helpers ──────────────────────────────────────────────────────
 
 import re
@@ -1675,6 +1712,12 @@ def api_kpi_benchmarks():
     Returns financial health, operational, and guest intelligence metrics with
     green/yellow/red status, prior-period deltas, and 6-month trend data.
     """
+    data = request.get_json() or {}
+    ck = _cache_key("kpi_benchmarks", data)
+    cached = _cache_get(ck)
+    if cached is not None:
+        return jsonify(cached)
+
     # ── Benchmark thresholds (tunable) ────────────────────────────────────
     KPI_BENCHMARKS = {
         "cogs_pct": {
@@ -2213,7 +2256,7 @@ def api_kpi_benchmarks():
                 bench_info[key]["good_min"] = b["good_min"]
                 bench_info[key]["watch_min"] = b["watch_min"]
 
-        return jsonify({
+        result = {
             "period": {"start": start_date, "end": end_date},
             "prior_period": {"start": prior_start, "end": prior_end},
             "adjusted_revenue": current["adjusted_revenue"],
@@ -2233,7 +2276,9 @@ def api_kpi_benchmarks():
             "trends": trends,
             "insights": insights,
             "benchmarks": bench_info,
-        })
+        }
+        _cache_set(ck, result)
+        return jsonify(result)
 
     except Exception as e:
         logging.exception("kpi-benchmarks API error")

@@ -6,12 +6,15 @@ import logging
 import time
 import uuid
 
-from flask import Flask, request, g
+from flask import Flask, request, g, jsonify
 
 from routes_etl import bp as etl_bp
 from routes_bank import bp as bank_bp
 from routes_dashboards import bp as dashboards_bp
 from routes_analytics import bp as analytics_bp
+
+# Dashboard access key — when set, all non-health routes require ?key= or X-Dashboard-Key header
+DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "")
 
 
 # ─── Structured JSON logging for Cloud Run ─────────────────────────────────
@@ -64,6 +67,38 @@ app.register_blueprint(etl_bp)
 app.register_blueprint(bank_bp)
 app.register_blueprint(dashboards_bp)
 app.register_blueprint(analytics_bp)
+
+
+@app.before_request
+def _check_dashboard_key():
+    """Gate dashboard/API access when DASHBOARD_KEY is set.
+
+    When DASHBOARD_KEY env var is configured:
+    - Health endpoint (/) always accessible
+    - All other routes require ?key=<key> or X-Dashboard-Key header
+    - Cloud Scheduler requests pass via Authorization header (handled by require_auth)
+
+    When DASHBOARD_KEY is empty: all routes are public (backward compatible).
+    """
+    if not DASHBOARD_KEY:
+        return  # no key configured = public access
+
+    # Always allow health check
+    if request.path == "/":
+        return
+
+    # Allow if valid dashboard key provided
+    key = request.args.get("key", "") or request.headers.get("X-Dashboard-Key", "")
+    if key == DASHBOARD_KEY:
+        return
+
+    # Allow if Bearer token or scheduler header present (for ETL routes)
+    if request.headers.get("Authorization", "").startswith("Bearer "):
+        return
+    if request.headers.get("X-Scheduler-Source"):
+        return
+
+    return jsonify({"error": "Access denied. Provide ?key= parameter or X-Dashboard-Key header."}), 403
 
 
 @app.before_request
