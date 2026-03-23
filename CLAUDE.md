@@ -144,11 +144,51 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
     https://toast-etl-pipeline-XXXXX-uc.a.run.app/backfill
 ```
 
+## Module Structure
+
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `main.py` | 22 | Flask app entry point — creates app, registers 4 blueprints |
+| `config.py` | 746 | All constants: env vars, business rules, FILE_CONFIGS, LOV3_EVENTS, EVENT_VENDOR_MAP, budget targets |
+| `models.py` | 58 | Dataclasses: PipelineResult, PipelineRunSummary, BankUploadResult |
+| `services.py` | 1,158 | 9 business logic classes: BofACSVParser, BankCategoryManager, CheckRegisterSync, SecretManager, ToastSFTPClient, SchemaValidator, DataTransformer, BigQueryLoader, AlertManager |
+| `pipeline.py` | 172 | ToastPipeline — orchestrates SFTP → transform → BigQuery |
+| `weekly_report.py` | 1,929 | WeeklyReportGenerator — weekly email with inline HTML |
+| `dashboards.py` | 4,839 | 14 self-contained HTML dashboard generators |
+| `routes_etl.py` | 153 | Blueprint: `/`, `/run`, `/backfill`, `/status/<table>`, `/weekly-report` |
+| `routes_bank.py` | 571 | Blueprint: `/upload-bank-csv`, `/bank-categories`, `/api/bank-transactions/*` |
+| `routes_dashboards.py` | 90 | Blueprint: 14 GET dashboard routes (thin wrappers) |
+| `routes_analytics.py` | 4,389 | Blueprint: all POST `/api/*` analytics endpoints |
+
+### Dependency Flow (no circular imports)
+```
+config.py ← models.py (no deps)
+    ↑
+services.py → config, models
+    ↑
+pipeline.py → config, models, services
+weekly_report.py → config, services
+dashboards.py (no deps — pure HTML strings)
+routes_*.py → config, models, services, pipeline, weekly_report, dashboards
+    ↑
+main.py → registers all 4 route blueprints
+```
+
+### Adding a New Dashboard
+1. Add `_my_dashboard_html()` to `dashboards.py`
+2. Add route in `routes_dashboards.py`: `@bp.route("/my-dash") ...`
+3. Add nav link to the nav bar in each dashboard (future: shared `_nav_bar_html()`)
+
+### Adding a New API Endpoint
+1. Add route function in `routes_analytics.py`
+2. Import needed constants from `config`
+
 ## Code Style
 - Python 3.11+
 - Type hints on all functions
 - Dataclasses for structured data
 - Logging to stdout (Cloud Logging picks it up)
+- Gunicorn entry point: `main:app`
 
 ## Important Notes
 - Pipeline runs daily at 6 AM CST via Cloud Scheduler
