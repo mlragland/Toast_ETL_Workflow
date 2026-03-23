@@ -9,3 +9,5 @@ requests>=2.31.0
 db-dtypes>=1.2.0
 sendgrid>=6.9.0
 google-api-python-client>=2.80.0
+pytest>=8.0.0
+pytest-mock>=3.12.0
