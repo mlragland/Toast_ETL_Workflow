@@ -5,6 +5,57 @@ Each function returns a self-contained HTML page (no external dependencies).
 These are pure string generators with no imports needed.
 """
 
+# ─── Shared navigation bar ─────────────────────────────────────────────────
+
+_NAV_LINKS = [
+    ("/bank-review", "Bank Review"),
+    ("/pnl", "P&L"),
+    ("/analysis", "Analysis"),
+    ("/cash-recon", "Cash Recon"),
+    ("/menu-mix", "Menu Mix"),
+    ("/servers", "Servers"),
+    ("/kitchen", "Kitchen"),
+    ("/labor", "Labor"),
+    ("/menu-eng", "Menu Eng"),
+    ("/events", "Events"),
+    ("/loyalty", "Loyalty"),
+    ("/kpi-benchmarks", "KPI"),
+    ("/budget", "Budget"),
+    ("/event-roi", "Event ROI"),
+    ("/flash", "Flash"),
+    ("/vendors", "Vendors"),
+]
+
+
+def _nav_html(active_path: str, theme: str = "dark") -> str:
+    """Generate the shared navigation bar HTML.
+    
+    Args:
+        active_path: The URL path of the current page (e.g. "/bank-review")
+        theme: "light" (white bg, pill links) or "dark" (dark bg, bottom border)
+    """
+    links = []
+    for path, label in _NAV_LINKS:
+        cls = ' class="active"' if path == active_path else ""
+        links.append(f'<a href="{path}"{cls}>{label}</a>')
+    return '<div class="nav-bar">\n' + "\n".join(links) + "\n</div>"
+
+
+def _nav_css(theme: str = "dark") -> str:
+    """Generate the CSS for the navigation bar."""
+    if theme == "light":
+        return """.nav-bar{background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
+.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#374151;transition:all 0.15s}
+.nav-bar a:hover{background:#f3f4f6}
+.nav-bar a.active{background:#6366f1;color:#fff}"""
+    else:
+        return """.nav-bar{display:flex;gap:0;background:#1a1a2e;padding:0 16px;flex-wrap:wrap}
+.nav-bar a{color:#94a3b8;text-decoration:none;padding:12px 16px;font-size:0.82rem;font-weight:500;transition:all 0.15s;border-bottom:2px solid transparent;white-space:nowrap}
+.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.nav-bar a.active{color:#fff;border-bottom-color:#6366f1;background:rgba(99,102,241,0.1)}"""
+
+
+
 def _bank_review_html() -> str:
     """Return self-contained HTML for the bank transaction review dashboard."""
     return '''<!DOCTYPE html>
@@ -83,10 +134,7 @@ td input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
 .upload-result{margin-top:8px;padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:0.82rem;color:#166534;display:none;width:100%}
 .upload-result .result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:8px}
 .upload-result .result-item{font-size:0.8rem}.upload-result .result-item strong{color:#15803d}
-.nav-bar{background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
-.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#374151;transition:all 0.15s}
-.nav-bar a:hover{background:#f3f4f6}
-.nav-bar a.active{background:#6366f1;color:#fff}
+''' + _nav_css("light") + '''
 </style>
 </head>
 <body>
@@ -97,22 +145,7 @@ td input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
   </div>
   <button class="btn-success" onclick="saveAll()" id="saveAllBtn" style="padding:10px 24px;border:none;border-radius:8px;font-size:0.9rem;font-weight:700;cursor:pointer;color:#fff">Save All Changes</button>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review" class="active">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/bank-review", "light") + '''
 
 <div class="container">
   <div class="kpi-row">
@@ -560,10 +593,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .header{background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff;padding:24px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
 .header h1{font-size:1.5rem;font-weight:700;letter-spacing:0.5px}
 .header .subtitle{font-size:0.85rem;opacity:0.7}
-.nav-bar{background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
-.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#374151;transition:all 0.15s}
-.nav-bar a:hover{background:#f3f4f6}
-.nav-bar a.active{background:#6366f1;color:#fff}
+''' + _nav_css("light") + '''
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
 .kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
@@ -618,22 +648,7 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
     <div class="subtitle">Revenue, expenses, and profitability for a selected date range</div>
   </div>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl" class="active">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/pnl", "light") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -861,10 +876,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .header{background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff;padding:24px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
 .header h1{font-size:1.5rem;font-weight:700;letter-spacing:0.5px}
 .header .subtitle{font-size:0.85rem;opacity:0.7}
-.nav-bar{background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
-.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#374151;transition:all 0.15s}
-.nav-bar a:hover{background:#f3f4f6}
-.nav-bar a.active{background:#6366f1;color:#fff}
+''' + _nav_css("light") + '''
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
 .kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
@@ -923,22 +935,7 @@ details.assumptions .body{padding:0 20px 16px;font-size:0.82rem;color:#555;line-
     <div class="subtitle">Monthly P&amp;L, revenue by day-of-week, and hourly revenue profile</div>
   </div>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis" class="active">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/analysis", "light") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -1195,10 +1192,7 @@ def _cash_recon_html() -> str:
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f3f4f6;color:#1a1a2e;min-height:100vh}
 .header{background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#a78bfa 100%);color:#fff;padding:20px 24px}
 .header h1{font-size:1.5rem;font-weight:700}.header .subtitle{font-size:0.85rem;opacity:0.85;margin-top:4px}
-.nav-bar{display:flex;gap:0;background:#1a1a2e;padding:0 16px;flex-wrap:wrap}
-.nav-bar a{color:#94a3b8;text-decoration:none;padding:12px 16px;font-size:0.82rem;font-weight:500;transition:all 0.15s;border-bottom:2px solid transparent;white-space:nowrap}
-.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
-.nav-bar a.active{color:#fff;border-bottom-color:#6366f1;background:rgba(99,102,241,0.1)}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:20px}
 .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
 .kpi-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
@@ -1252,22 +1246,7 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
     <div class="subtitle">POS collections vs bank deposits &mdash; credit card settlement &amp; cash tracking</div>
   </div>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon" class="active">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/cash-recon", "dark") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -1558,10 +1537,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .header{background:linear-gradient(135deg,#4c1d95,#7c3aed,#6d28d9);color:#fff;padding:24px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
 .header h1{font-size:1.5rem;font-weight:700;letter-spacing:0.5px}
 .header .subtitle{font-size:0.85rem;opacity:0.7}
-.nav-bar{background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
-.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#374151;transition:all 0.15s}
-.nav-bar a:hover{background:#f3f4f6}
-.nav-bar a.active{background:#7c3aed;color:#fff}
+''' + _nav_css("light") + '''
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
 .kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
@@ -1619,22 +1595,7 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
     <div class="subtitle">Item performance, category breakdown, daypart &amp; day-of-week analysis</div>
   </div>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix" class="active">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/menu-mix", "light") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -1834,10 +1795,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .header{background:linear-gradient(135deg,#b91c1c,#dc2626,#f97316);padding:1.5rem 2rem;text-align:center}
 .header h1{font-size:1.6rem;font-weight:700;color:#fff;letter-spacing:0.5px}
 .header p{color:rgba(255,255,255,.8);font-size:.85rem;margin-top:.25rem}
-.nav-bar{display:flex;gap:.5rem;padding:.75rem 2rem;background:#1a1a1a;border-bottom:1px solid #333;flex-wrap:wrap}
-.nav-bar a{color:#999;text-decoration:none;padding:.4rem .9rem;border-radius:6px;font-size:.82rem;transition:all .15s}
-.nav-bar a:hover{color:#fff;background:#333}
-.nav-bar a.active{color:#fff;background:#dc2626;font-weight:600}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:1.5rem}
 .year-toggle{display:flex;gap:.5rem;justify-content:center;margin-bottom:1.5rem}
 .year-btn{padding:.5rem 1.5rem;border:2px solid #444;background:transparent;color:#ccc;border-radius:8px;cursor:pointer;font-size:.9rem;font-weight:600;transition:all .15s}
@@ -1899,22 +1857,7 @@ tr:hover td{background:#1a1a1a}
   <h1>LOV3 Events &amp; Promotional Calendar</h1>
   <p>Forward-looking event planning &amp; historical revenue overlay</p>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events" class="active">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/events", "dark") + '''
 
 <div class="container">
   <div class="year-toggle">
@@ -2143,10 +2086,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .header{background:linear-gradient(135deg,#0d9488,#14b8a6,#2dd4bf);padding:1.5rem 2rem;text-align:center}
 .header h1{font-size:1.6rem;font-weight:700;color:#fff;letter-spacing:0.5px}
 .header p{color:rgba(255,255,255,.8);font-size:.85rem;margin-top:.25rem}
-.nav-bar{display:flex;gap:.5rem;padding:.75rem 2rem;background:#1a1a1a;border-bottom:1px solid #333;flex-wrap:wrap}
-.nav-bar a{color:#999;text-decoration:none;padding:.4rem .9rem;border-radius:6px;font-size:.82rem;transition:all .15s}
-.nav-bar a:hover{color:#fff;background:#333}
-.nav-bar a.active{color:#fff;background:#14b8a6;font-weight:600}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:1.5rem}
 .filter-bar{display:flex;gap:1rem;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap}
 .filter-bar label{font-size:.82rem;color:#999}
@@ -2198,22 +2138,7 @@ tr:hover td{background:#1a1a1a}
   <h1>LOV3 Guest Intelligence</h1>
   <p>Card-based guest segmentation, visit behavior &amp; revenue analytics</p>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty" class="active">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/loyalty", "dark") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -2533,10 +2458,7 @@ def _server_performance_html() -> str:
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
 .header{background:linear-gradient(135deg,#059669,#10b981,#34d399);padding:24px 32px;color:#fff}
 .header h1{font-size:1.5rem;font-weight:800;letter-spacing:-0.5px}.header .subtitle{font-size:0.85rem;opacity:0.9;margin-top:4px}
-.nav-bar{background:#1a1a1a;border-bottom:1px solid #333;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
-.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#9ca3af;transition:all 0.15s}
-.nav-bar a:hover{background:#222;color:#fff}
-.nav-bar a.active{background:#10b981;color:#fff}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .filter-bar{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .filter-bar label{font-size:0.82rem;color:#9ca3af;font-weight:600}
@@ -2588,22 +2510,7 @@ tr.clickable:hover td{background:#0d3320}
   <h1>LOV3 Server Performance</h1>
   <div class="subtitle">Server rankings, tip analysis, and individual performance breakdown</div>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers" class="active">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/servers", "dark") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -2774,10 +2681,7 @@ def _kitchen_speed_html() -> str:
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
 .header{background:linear-gradient(135deg,#d97706,#f59e0b,#fbbf24);padding:24px 32px;color:#fff}
 .header h1{font-size:1.5rem;font-weight:800;letter-spacing:-0.5px}.header .subtitle{font-size:0.85rem;opacity:0.9;margin-top:4px}
-.nav-bar{background:#1a1a1a;border-bottom:1px solid #333;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
-.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#9ca3af;transition:all 0.15s}
-.nav-bar a:hover{background:#222;color:#fff}
-.nav-bar a.active{background:#f59e0b;color:#fff}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .filter-bar{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .filter-bar label{font-size:0.82rem;color:#9ca3af;font-weight:600}
@@ -2823,22 +2727,7 @@ tr:hover td{background:#1a1a1a}
   <h1>LOV3 Kitchen Speed</h1>
   <div class="subtitle">Station performance, cook leaderboard, and fulfillment tracking</div>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen" class="active">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/kitchen", "dark") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -2997,10 +2886,7 @@ def _labor_dashboard_html() -> str:
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
 .header{background:linear-gradient(135deg,#1d4ed8,#3b82f6,#60a5fa);padding:24px 32px;color:#fff}
 .header h1{font-size:1.5rem;font-weight:800;letter-spacing:-0.5px}.header .subtitle{font-size:0.85rem;opacity:0.9;margin-top:4px}
-.nav-bar{background:#1a1a1a;border-bottom:1px solid #333;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
-.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#9ca3af;transition:all 0.15s}
-.nav-bar a:hover{background:#222;color:#fff}
-.nav-bar a.active{background:#3b82f6;color:#fff}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .filter-bar{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .filter-bar label{font-size:0.82rem;color:#9ca3af;font-weight:600}
@@ -3046,22 +2932,7 @@ tr:hover td{background:#1a1a1a}
   <h1>LOV3 Labor Analysis</h1>
   <div class="subtitle">Weekly labor cost tracking, true labor %, and vendor breakdown</div>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor" class="active">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/labor", "dark") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -3207,10 +3078,7 @@ def _menu_engineering_html() -> str:
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
 .header{background:linear-gradient(135deg,#7c3aed,#8b5cf6,#a78bfa);padding:24px 32px;color:#fff}
 .header h1{font-size:1.5rem;font-weight:800;letter-spacing:-0.5px}.header .subtitle{font-size:0.85rem;opacity:0.9;margin-top:4px}
-.nav-bar{background:#1a1a1a;border-bottom:1px solid #333;padding:8px 32px;display:flex;gap:8px;flex-wrap:wrap}
-.nav-bar a{text-decoration:none;padding:8px 20px;border-radius:9999px;font-size:0.85rem;font-weight:600;color:#9ca3af;transition:all 0.15s}
-.nav-bar a:hover{background:#222;color:#fff}
-.nav-bar a.active{background:#8b5cf6;color:#fff}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .filter-bar{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .filter-bar label{font-size:0.82rem;color:#9ca3af;font-weight:600}
@@ -3267,22 +3135,7 @@ tr:hover td{background:#1a1a1a}
   <h1>LOV3 Menu Engineering</h1>
   <div class="subtitle">Item classification matrix &mdash; Stars, Plowhorses, Puzzles &amp; Dogs</div>
 </div>
-<div class="nav-bar">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L Summary</a>
-  <a href="/analysis">Comprehensive Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng" class="active">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/menu-eng", "dark") + '''
 
 <div class="container">
   <div class="filter-bar">
@@ -3472,10 +3325,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .header{background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);padding:32px 40px;border-bottom:3px solid #4f46e5}
 .header h1{font-size:28px;font-weight:700;color:#fff}
 .header p{color:rgba(255,255,255,.85);margin-top:4px;font-size:14px}
-.nav{display:flex;gap:0;background:#1a1a2e;border-bottom:1px solid #333;overflow-x:auto}
-.nav a{padding:10px 16px;color:#9ca3af;text-decoration:none;font-size:13px;white-space:nowrap;border-bottom:2px solid transparent;transition:all .2s}
-.nav a:hover{color:#a5b4fc;background:rgba(99,102,241,.1)}
-.nav a.active{color:#a5b4fc;border-bottom-color:#818cf8;background:rgba(99,102,241,.15)}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .toggle-bar{display:flex;gap:8px;margin-bottom:20px;align-items:center}
 .toggle-btn{padding:8px 20px;border:1px solid #4f46e5;background:transparent;color:#a5b4fc;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s}
@@ -3542,22 +3392,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
   <h1>LOV3 KPI Benchmarks</h1>
   <p>Performance scorecard with industry benchmarks &mdash; MTD &amp; YTD</p>
 </div>
-<div class="nav">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L</a>
-  <a href="/analysis">Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks" class="active">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi">Event ROI</a>
-</div>
+''' + _nav_html("/kpi-benchmarks", "dark") + '''
 <div class="container">
   <div class="toggle-bar">
     <button class="toggle-btn active" id="btnMTD" onclick="toggleView('mtd')">MTD</button>
@@ -3877,10 +3712,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .header{background:linear-gradient(135deg,#059669,#10b981,#34d399);padding:24px 32px;text-align:center}
 .header h1{font-size:24px;font-weight:700;color:#fff}
 .header p{color:rgba(255,255,255,.85);font-size:13px;margin-top:4px}
-.nav{display:flex;gap:4px;padding:8px 16px;background:#1a1a2e;flex-wrap:wrap;justify-content:center}
-.nav a{color:#94a3b8;text-decoration:none;padding:6px 14px;border-radius:6px;font-size:13px;transition:.2s}
-.nav a:hover{background:#334155;color:#e2e8f0}
-.nav a.active{background:#059669;color:#fff}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:20px}
 .filter-bar{display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
 .filter-bar label{color:#94a3b8;font-size:13px}
@@ -4044,21 +3876,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
   <p>Monthly spending performance vs 15% profit margin target</p>
   <p style="max-width:720px;margin:8px auto 0;font-size:12px;color:rgba(255,255,255,.7);line-height:1.5">Are you spending within your means? This dashboard compares actual monthly expenses to budget targets across COGS, Labor, Marketing, and OPEX. Use it to spot cost overruns before they erode margins, identify which vendors are driving overspend, and prioritize the categories with the biggest savings opportunity on the path to 15% profit.</p>
 </div>
-<div class="nav">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L</a>
-  <a href="/analysis">Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget" class="active">Budget</a>
-</div>
+''' + _nav_html("/budget", "dark") + '''
 <div class="container">
   <div class="filter-bar">
     <label>Month:</label>
@@ -4494,10 +4312,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .header{background:linear-gradient(135deg,#92400e,#d97706,#f59e0b);padding:24px 32px;text-align:center}
 .header h1{font-size:24px;font-weight:700;color:#fff}
 .header p{color:rgba(255,255,255,.85);font-size:13px;margin-top:4px}
-.nav{display:flex;gap:4px;padding:8px 16px;background:#1a1a2e;flex-wrap:wrap;justify-content:center}
-.nav a{color:#94a3b8;text-decoration:none;padding:6px 14px;border-radius:6px;font-size:13px;transition:.2s}
-.nav a:hover{background:#334155;color:#e2e8f0}
-.nav a.active{background:#d97706;color:#fff}
+''' + _nav_css("dark") + '''
 .container{max-width:1400px;margin:0 auto;padding:20px}
 .filter-bar{display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
 .filter-bar label{color:#94a3b8;font-size:13px}
@@ -4584,22 +4399,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
   <p>Per-event profitability analysis &mdash; recurring weekly events</p>
   <p style="max-width:720px;margin:8px auto 0;font-size:12px;color:rgba(255,255,255,.7);line-height:1.5">Which nights are earning their keep? This dashboard measures <strong>contribution margin</strong> &mdash; revenue minus the variable costs each event generates (entertainment, marketing, staffing). Fixed overhead like management salaries, rent, and COGS are excluded because they don&rsquo;t change if you add or cancel a night. Use this to identify underperforming events, evaluate promoter &amp; talent spend, and decide where to invest or cut.</p>
 </div>
-<div class="nav">
-  <a href="/bank-review">Bank Review</a>
-  <a href="/pnl">P&amp;L</a>
-  <a href="/analysis">Analysis</a>
-  <a href="/cash-recon">Cash Recon</a>
-  <a href="/menu-mix">Menu Mix</a>
-  <a href="/servers">Servers</a>
-  <a href="/kitchen">Kitchen</a>
-  <a href="/labor">Labor</a>
-  <a href="/menu-eng">Menu Eng</a>
-  <a href="/events">Events</a>
-  <a href="/loyalty">Loyalty</a>
-  <a href="/kpi-benchmarks">KPI</a>
-  <a href="/budget">Budget</a>
-  <a href="/event-roi" class="active">Event ROI</a>
-</div>
+''' + _nav_html("/event-roi", "dark") + '''
 <div class="container">
   <div class="filter-bar">
     <label>From:</label>
@@ -4850,10 +4650,7 @@ def _flash_report_html() -> str:
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-.nav-bar{display:flex;gap:0;background:#1a1a2e;padding:0 16px;flex-wrap:wrap}
-.nav-bar a{color:#94a3b8;text-decoration:none;padding:12px 16px;font-size:0.82rem;font-weight:500;transition:all 0.15s;border-bottom:2px solid transparent;white-space:nowrap}
-.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
-.nav-bar a.active{color:#fff;border-bottom-color:#f59e0b;background:rgba(245,158,11,0.1)}
+""" + _nav_css("dark") + """
 .container{max-width:1200px;margin:0 auto;padding:24px}
 .header{text-align:center;padding:24px 0;background:linear-gradient(135deg,#f59e0b22,#d9770622);border-radius:12px;margin-bottom:24px}
 .header h1{font-size:1.6rem;color:#f59e0b}
@@ -4889,14 +4686,7 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFo
 </style>
 </head>
 <body>
-<div class="nav-bar">
-<a href="/bank-review">Bank Review</a><a href="/pnl">P&amp;L</a><a href="/analysis">Analysis</a>
-<a href="/cash-recon">Cash Recon</a><a href="/menu-mix">Menu Mix</a><a href="/servers">Servers</a>
-<a href="/kitchen">Kitchen</a><a href="/labor">Labor</a><a href="/menu-eng">Menu Eng</a>
-<a href="/events">Events</a><a href="/loyalty">Loyalty</a><a href="/kpi-benchmarks">KPI</a>
-<a href="/budget">Budget</a><a href="/event-roi">Event ROI</a>
-<a href="/flash" class="active">Flash</a>
-</div>
+""" + _nav_html("/flash", "dark") + """
 <div class="container">
 <div class="header">
 <h1>🍴 Daily Flash Report</h1>
@@ -5004,10 +4794,7 @@ def _vendor_tracker_html() -> str:
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-.nav-bar{display:flex;gap:0;background:#1a1a2e;padding:0 16px;flex-wrap:wrap}
-.nav-bar a{color:#94a3b8;text-decoration:none;padding:12px 16px;font-size:0.82rem;font-weight:500;transition:all 0.15s;border-bottom:2px solid transparent;white-space:nowrap}
-.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
-.nav-bar a.active{color:#fff;border-bottom-color:#8b5cf6;background:rgba(139,92,246,0.1)}
+""" + _nav_css("dark") + """
 .container{max-width:1200px;margin:0 auto;padding:24px}
 .header{text-align:center;padding:24px 0;background:linear-gradient(135deg,#8b5cf622,#6d28d922);border-radius:12px;margin-bottom:24px}
 .header h1{font-size:1.6rem;color:#a78bfa}
@@ -5038,14 +4825,7 @@ tr:hover{background:#1e293b88}
 </style>
 </head>
 <body>
-<div class="nav-bar">
-<a href="/bank-review">Bank Review</a><a href="/pnl">P&amp;L</a><a href="/analysis">Analysis</a>
-<a href="/cash-recon">Cash Recon</a><a href="/menu-mix">Menu Mix</a><a href="/servers">Servers</a>
-<a href="/kitchen">Kitchen</a><a href="/labor">Labor</a><a href="/menu-eng">Menu Eng</a>
-<a href="/events">Events</a><a href="/loyalty">Loyalty</a><a href="/kpi-benchmarks">KPI</a>
-<a href="/budget">Budget</a><a href="/event-roi">Event ROI</a><a href="/flash">Flash</a>
-<a href="/vendors" class="active">Vendors</a>
-</div>
+""" + _nav_html("/vendors", "dark") + """
 <div class="container">
 <div class="header">
 <h1>🏢 Vendor Spend Tracker</h1>
