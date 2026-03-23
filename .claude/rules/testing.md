@@ -1,19 +1,19 @@
 # Testing Standards — Toast ETL Pipeline
 
-## Current Score: 16/40 (Grade D) — up from 3/40
+## Current Score: 22/40 (Grade C) — up from 3/40
 | Category | Score | Notes |
 |----------|-------|-------|
 | Smoke Tests | 3 | 5 smoke tests: health, 14 dashboards, 404 |
 | Integration Tests | 3 | 13 route tests with mocked BigQuery (bank + ETL) |
-| Unit Tests | 2 | 17 tests: BofACSVParser, DataTransformer, models, config |
-| Data Validation | 0 | None yet |
-| Test Infrastructure | 2 | pytest + conftest.py + fixtures |
+| Unit Tests | 3 | 17 tests: BofACSVParser, DataTransformer, models, config |
+| Data Validation | 3 | 14 tests: schema validation, transform quality, bank CSV quality |
+| Test Infrastructure | 3 | pytest + conftest.py + fixtures + GitHub Actions (pending token) |
 | Error Recovery | 2 | Error path tests for bad input, missing files, invalid dates |
-| Regression Protection | 2 | 42 tests catch regressions on categorization, routes, shapes |
+| Regression Protection | 3 | 56 tests catch regressions on categorization, routes, schemas, data |
 | Observability | 0 | Cloud Run default metrics only |
 
 **Target: 25/40 (Grade B) — safe for regular deploys.**
-**Next: Data validation (ETL row counts), CI/CD pipeline, more error paths.**
+**Next: Push CI workflow (needs token update), add observability (+2), more error paths (+1).**
 
 ## Test Infrastructure
 - Framework: pytest with conftest.py fixtures
