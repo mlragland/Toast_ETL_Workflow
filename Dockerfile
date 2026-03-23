@@ -1,61 +1,23 @@
-# Multi-stage build for optimizing final image size
-FROM python:3.11-slim as builder
-
-# Install system dependencies needed for compilation
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Copy requirements first for better layer caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Production stage
 FROM python:3.11-slim
-
-# Install runtime dependencies only
-RUN apt-get update && apt-get install -y \
-    openssh-client \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
-# Copy virtual environment from builder stage
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-# Create non-root user for security
-RUN groupadd -r etluser && useradd -r -g etluser etluser
 
 # Set working directory
 WORKDIR /app
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 # Copy application code
-COPY src/ ./src/
 COPY main.py .
 
-# Create directories for logs and temporary files
-RUN mkdir -p /app/logs /app/tmp && chown -R etluser:etluser /app
-
-# Switch to non-root user
-USER etluser
-
-# Add health check for web server mode
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || python -c "import sys; sys.exit(0)"
-
 # Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
-ENV FLASK_APP=main.py
+ENV PYTHONUNBUFFERED=1
 
-# Expose port for Cloud Run
-EXPOSE 8080
-
-# Default command (supports both CLI and web server modes)
-CMD ["python", "main.py"] 
+# Run with gunicorn
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 300 main:app

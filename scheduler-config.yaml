@@ -1,0 +1,43 @@
+# Cloud Scheduler Job Configuration
+# Runs the Toast ETL pipeline daily at 6 AM CST (12:00 UTC)
+
+# Create the job with gcloud:
+# gcloud scheduler jobs create http toast-etl-daily \
+#   --location=us-central1 \
+#   --schedule="0 12 * * *" \
+#   --uri="https://toast-etl-pipeline-XXXXX-uc.a.run.app/run" \
+#   --http-method=POST \
+#   --headers="Content-Type=application/json" \
+#   --oidc-service-account-email="toast-etl-scheduler@toast-analytics-444116.iam.gserviceaccount.com" \
+#   --message-body='{"processing_date": null, "backfill_days": 0}'
+
+name: toast-etl-daily
+description: "Daily Toast SFTP to BigQuery ETL pipeline for LOV3 Houston"
+
+schedule:
+  # Run at 6 AM CST (12:00 UTC) every day
+  # Toast files are typically available by 5 AM
+  cron: "0 12 * * *"
+  timezone: "America/Chicago"
+
+http_target:
+  uri: "${CLOUD_RUN_URL}/run"
+  http_method: POST
+  headers:
+    Content-Type: application/json
+  body:
+    processing_date: null  # Will default to yesterday
+    backfill_days: 0
+  
+  # Use OIDC authentication for Cloud Run
+  oidc_token:
+    service_account_email: "toast-etl-scheduler@toast-analytics-444116.iam.gserviceaccount.com"
+
+retry_config:
+  retry_count: 3
+  max_retry_duration: "3600s"
+  min_backoff_duration: "30s"
+  max_backoff_duration: "300s"
+  max_doublings: 3
+
+attempt_deadline: "600s"  # 10 minute timeout
