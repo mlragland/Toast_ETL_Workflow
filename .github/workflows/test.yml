@@ -30,4 +30,4 @@ name: Tests
 
         - name: Test summary
           if: always()
-          run: pytest tests/ --tb=no -q
+          run: pytest tests/ --tb=no -qpytest tests/ --tb=no -q
