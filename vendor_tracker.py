@@ -57,7 +57,7 @@ class VendorTracker:
             COUNT(DISTINCT FORMAT_DATE('%Y-%m', transaction_date)) AS active_months
         FROM {self.table}
         WHERE transaction_type = 'debit'
-          AND transaction_date BETWEEN @start_date AND @end_date
+          AND transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
           AND vendor_normalized IS NOT NULL
           AND vendor_normalized != ''
           AND category != 'Uncategorized'
@@ -93,7 +93,7 @@ class VendorTracker:
             SELECT vendor_normalized, SUM(ABS(amount)) AS total
             FROM {self.table}
             WHERE transaction_type = 'debit'
-              AND transaction_date BETWEEN @start_date AND @end_date
+              AND transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
               AND vendor_normalized IS NOT NULL AND vendor_normalized != ''
               AND category != 'Uncategorized'
             GROUP BY vendor_normalized
@@ -108,7 +108,7 @@ class VendorTracker:
         FROM {self.table} t
         JOIN ranked r ON t.vendor_normalized = r.vendor_normalized
         WHERE t.transaction_type = 'debit'
-          AND t.transaction_date BETWEEN @start_date AND @end_date
+          AND t.transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
         GROUP BY month, vendor
         ORDER BY month, monthly_spend DESC
         """
@@ -137,7 +137,7 @@ class VendorTracker:
             COUNT(DISTINCT vendor_normalized) AS vendor_count
         FROM {self.table}
         WHERE transaction_type = 'debit'
-          AND transaction_date BETWEEN @start_date AND @end_date
+          AND transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
           AND category != 'Uncategorized'
           AND category IS NOT NULL
         GROUP BY section

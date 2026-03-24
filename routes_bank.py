@@ -269,11 +269,11 @@ def api_bank_transactions():
             params.append(bigquery.ScalarQueryParameter("search", "STRING", search))
 
         if date_from:
-            where_parts.append("transaction_date >= @date_from")
+            where_parts.append("transaction_date >= PARSE_DATE('%Y-%m-%d', @date_from)")
             params.append(bigquery.ScalarQueryParameter("date_from", "STRING", date_from))
 
         if date_to:
-            where_parts.append("transaction_date <= @date_to")
+            where_parts.append("transaction_date <= PARSE_DATE('%Y-%m-%d', @date_to)")
             params.append(bigquery.ScalarQueryParameter("date_to", "STRING", date_to))
 
         where_sql = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
@@ -450,7 +450,7 @@ def api_bank_transactions_categorize():
             SET category = @new_cat,
                 category_source = 'manual',
                 vendor_normalized = @vendor
-            WHERE transaction_date = @txn_date
+            WHERE transaction_date = PARSE_DATE('%Y-%m-%d', @txn_date)
               AND description = @desc
               AND ROUND(amount, 2) = ROUND(@amount, 2)
             """
@@ -556,7 +556,7 @@ def api_bank_transactions_delete():
                 # amount=0 from the API means NULL in BigQuery (see serialization in api_bank_transactions)
                 delete_sql = f"""
                 DELETE FROM {table}
-                WHERE transaction_date = @txn_date
+                WHERE transaction_date = PARSE_DATE('%Y-%m-%d', @txn_date)
                   AND description = @desc
                   AND (amount IS NULL OR ROUND(amount, 2) = 0)
                 """
@@ -569,7 +569,7 @@ def api_bank_transactions_delete():
             else:
                 delete_sql = f"""
                 DELETE FROM {table}
-                WHERE transaction_date = @txn_date
+                WHERE transaction_date = PARSE_DATE('%Y-%m-%d', @txn_date)
                   AND description = @desc
                   AND ROUND(amount, 2) = ROUND(@amount, 2)
                 """

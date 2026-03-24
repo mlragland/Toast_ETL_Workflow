@@ -411,7 +411,7 @@ def api_server_performance():
             SAFE_DIVIDE(SUM(tip), NULLIF(SUM(amount), 0)) * 100 AS tip_pct,
             SAFE_DIVIDE(SUM(discount_amount), NULLIF(SUM(amount + discount_amount), 0)) * 100 AS discount_pct
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND (voided IS NULL OR LOWER(voided) != 'true')
             AND server IS NOT NULL AND TRIM(server) != ''
         GROUP BY server
@@ -430,7 +430,7 @@ def api_server_performance():
             SUM(amount) AS revenue,
             SAFE_DIVIDE(SUM(amount), COUNT(*)) AS avg_check
         FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND status IN ('CAPTURED', 'AUTHORIZED', 'CAPTURE_IN_PROGRESS')
             AND server IS NOT NULL AND TRIM(server) != ''
         GROUP BY server, dow, hour
@@ -564,7 +564,7 @@ def api_kitchen_speed():
                 TIMESTAMP_DIFF(CAST(fulfilled_date AS DATETIME), CAST(fired_date AS DATETIME), SECOND) END) AS max_sec,
             SAFE_DIVIDE(COUNTIF(fulfilled_date IS NOT NULL), COUNT(*)) * 100 AS fulfillment_pct
         FROM `{PROJECT_ID}.{DATASET_ID}.KitchenTimings_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND fired_date IS NOT NULL
             AND station IS NOT NULL AND TRIM(station) != ''
         GROUP BY station
@@ -579,7 +579,7 @@ def api_kitchen_speed():
             AVG(CASE WHEN fulfilled_date IS NOT NULL THEN
                 TIMESTAMP_DIFF(CAST(fulfilled_date AS DATETIME), CAST(fired_date AS DATETIME), SECOND) END) AS avg_sec
         FROM `{PROJECT_ID}.{DATASET_ID}.KitchenTimings_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND fired_date IS NOT NULL
         GROUP BY hour
         ORDER BY hour
@@ -593,7 +593,7 @@ def api_kitchen_speed():
             AVG(TIMESTAMP_DIFF(CAST(fulfilled_date AS DATETIME), CAST(fired_date AS DATETIME), SECOND)) AS avg_sec,
             MIN(TIMESTAMP_DIFF(CAST(fulfilled_date AS DATETIME), CAST(fired_date AS DATETIME), SECOND)) AS min_sec
         FROM `{PROJECT_ID}.{DATASET_ID}.KitchenTimings_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND fulfilled_date IS NOT NULL
             AND fired_date IS NOT NULL
             AND fulfilled_by IS NOT NULL AND TRIM(fulfilled_by) != ''
@@ -611,7 +611,7 @@ def api_kitchen_speed():
             AVG(CASE WHEN fulfilled_date IS NOT NULL THEN
                 TIMESTAMP_DIFF(CAST(fulfilled_date AS DATETIME), CAST(fired_date AS DATETIME), SECOND) END) AS avg_sec
         FROM `{PROJECT_ID}.{DATASET_ID}.KitchenTimings_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND fired_date IS NOT NULL
         GROUP BY week
         ORDER BY week
@@ -710,7 +710,7 @@ def api_labor_analysis():
             COALESCE(SUM(gratuity), 0) AS gratuity,
             COUNT(DISTINCT order_id) AS order_count
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND (voided IS NULL OR voided = 'false')
         GROUP BY week_start ORDER BY week_start
         """
@@ -723,7 +723,7 @@ def api_labor_analysis():
             ROUND(SUM(abs_amount), 2) AS total,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
         GROUP BY week_start, category ORDER BY week_start
         """
@@ -736,7 +736,7 @@ def api_labor_analysis():
             COALESCE(SUM(tip), 0) AS tips,
             COALESCE(SUM(gratuity), 0) AS gratuity
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND (voided IS NULL OR voided = 'false')
         GROUP BY month ORDER BY month
         """
@@ -748,7 +748,7 @@ def api_labor_analysis():
             category,
             ROUND(SUM(abs_amount), 2) AS total
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
         GROUP BY month, category ORDER BY month
         """
@@ -760,7 +760,7 @@ def api_labor_analysis():
             ROUND(SUM(abs_amount), 2) AS total,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
             AND (LOWER(category) LIKE '%labor%' OR LOWER(category) LIKE '%payroll%')
         GROUP BY vendor ORDER BY total DESC
@@ -1851,7 +1851,7 @@ def api_kpi_benchmarks():
             COUNT(DISTINCT processing_date) AS operating_days,
             COALESCE(SUM(discount_amount), 0) AS total_discounts
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN @sd AND @ed
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @sd) AND PARSE_DATE('%Y-%m-%d', @ed)
           AND (voided IS NULL OR voided = 'false')
         """
         rev_row = list(bq_client.query(rev_q, job_config=period_params).result())[0]
@@ -1876,7 +1876,7 @@ def api_kpi_benchmarks():
         void_q = f"""
         SELECT COALESCE(SUM(ABS(amount)), 0) AS voided_amount
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN @sd AND @ed
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @sd) AND PARSE_DATE('%Y-%m-%d', @ed)
           AND voided = 'true'
         """
         void_row = list(bq_client.query(void_q, job_config=period_params).result())[0]
@@ -1905,7 +1905,7 @@ def api_kpi_benchmarks():
             exp_q = f"""
             SELECT category, ROUND(SUM(abs_amount), 2) AS total
             FROM `{bank_table}`
-            WHERE transaction_date BETWEEN @sd AND @ed
+            WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @sd) AND PARSE_DATE('%Y-%m-%d', @ed)
               AND transaction_type = 'debit'
             GROUP BY category ORDER BY total DESC
             """
@@ -2325,7 +2325,7 @@ def api_budget():
             COALESCE(SUM(gratuity), 0) AS total_gratuity,
             COUNT(DISTINCT order_id) AS order_count
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND (voided IS NULL OR voided = 'false')
         """
         rev_row = list(bq_client.query(rev_q, job_config=date_params).result())[0]
@@ -2344,7 +2344,7 @@ def api_budget():
             COALESCE(SUM(CASE WHEN sales_category = 'Liquor' THEN CAST(net_price AS FLOAT64) ELSE 0 END), 0) AS liquor_rev,
             COALESCE(SUM(CAST(net_price AS FLOAT64)), 0) AS item_total
         FROM `{PROJECT_ID}.{DATASET_ID}.ItemSelectionDetails_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND (voided IS NULL OR voided = 'false')
         """
         rev_cat_row = list(bq_client.query(rev_cat_q, job_config=date_params).result())[0]
@@ -2355,7 +2355,7 @@ def api_budget():
         hookah_bank_q = f"""
         SELECT COALESCE(SUM(amount), 0) AS hookah_rev
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND LOWER(category) LIKE '%hookah sales%'
             AND amount > 0
         """
@@ -2371,7 +2371,7 @@ def api_budget():
             category,
             ROUND(SUM(abs_amount), 2) AS total
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
         GROUP BY category
         ORDER BY total DESC
@@ -2402,7 +2402,7 @@ def api_budget():
             COUNT(*) AS txns
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
         WHERE transaction_type = 'debit'
-            AND transaction_date BETWEEN @start_date AND @end_date
+            AND transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
         GROUP BY vendor_normalized, category
         ORDER BY total DESC
         LIMIT 50
@@ -2428,7 +2428,7 @@ def api_budget():
             vendor_normalized
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
         WHERE transaction_type = 'debit'
-            AND transaction_date BETWEEN @start_date AND @end_date
+            AND transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
         ORDER BY abs_amount DESC
         LIMIT 500
         """
@@ -2460,7 +2460,7 @@ def api_budget():
             COALESCE(SUM(tip), 0) AS tips,
             COALESCE(SUM(gratuity), 0) AS grat
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN @hist_start AND @hist_end
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @hist_start) AND PARSE_DATE('%Y-%m-%d', @hist_end)
             AND (voided IS NULL OR voided = 'false')
         GROUP BY month ORDER BY month
         """
@@ -2470,7 +2470,7 @@ def api_budget():
             category,
             ROUND(SUM(abs_amount), 2) AS total
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @hist_start AND @hist_end
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @hist_start) AND PARSE_DATE('%Y-%m-%d', @hist_end)
             AND transaction_type = 'debit'
         GROUP BY month, category
         ORDER BY month
@@ -2939,7 +2939,7 @@ def api_budget_drilldown():
             category_source
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
         WHERE transaction_type = 'debit'
-            AND transaction_date BETWEEN @start_date AND @end_date
+            AND transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND {kw_where}
         ORDER BY abs_amount DESC
         """
@@ -3037,7 +3037,7 @@ def api_event_roi():
             ROUND(SUM(abs_amount), 2) AS total_amount,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
             AND ({direct_likes})
         GROUP BY month, vendor, category
@@ -3052,7 +3052,7 @@ def api_event_roi():
             ROUND(SUM(abs_amount), 2) AS total_amount,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
             AND ({shared_likes})
         GROUP BY month, category
@@ -3067,7 +3067,7 @@ def api_event_roi():
             ROUND(SUM(abs_amount), 2) AS total_amount,
             COUNT(*) AS txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
             AND ({direct_likes})
         GROUP BY vendor, category
@@ -3084,7 +3084,7 @@ def api_event_roi():
             LEFT(CAST(transaction_date AS STRING), 7) AS month,
             ROUND(SUM(abs_amount), 2) AS total_labor
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
             AND (LOWER(category) LIKE '%labor%' OR LOWER(category) LIKE '%payroll%')
             AND {ops_likes}
@@ -3103,7 +3103,7 @@ def api_event_roi():
             ROUND(SUM(abs_amount), 2) AS total_amount,
             category
         FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-        WHERE transaction_date BETWEEN @start_date AND @end_date
+        WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND transaction_type = 'debit'
             AND ({ops_cat_likes})
         GROUP BY month, category
@@ -3872,7 +3872,7 @@ def api_cash_recon():
                 COALESCE(SUM(amount), 0) AS net_amount,
                 COUNT(*) AS txn_count
             FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-            WHERE CAST(transaction_date AS DATE) BETWEEN @start_date AND @end_date
+            WHERE CAST(transaction_date AS DATE) BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
                 AND (description LIKE '%Citizens%' OR description LIKE '%TOAST%'
                      OR description LIKE '%Toast%' OR description LIKE '%Counter Credit%'
                      OR (description LIKE 'Online Banking transfer from CHK 9121%' AND amount > 0))
@@ -4098,7 +4098,7 @@ def profit_summary():
             COALESCE(SUM(total), 0) as gross_revenue,
             COUNT(DISTINCT order_id) as order_count
         FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
             AND (voided IS NULL OR voided = 'false')
         """
         date_params = bigquery.QueryJobConfig(query_parameters=[
@@ -4122,7 +4122,7 @@ def profit_summary():
                          THEN total ELSE 0 END), 0) as cash_collected,
             COUNTIF(payment_type = 'Cash' OR payment_type LIKE '%CASH%') as cash_txn_count
         FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
         """
         cash_row = list(bq_client.query(cash_query, job_config=date_params).result())[0]
         cash_collected = float(cash_row.cash_collected or 0)
@@ -4137,7 +4137,7 @@ def profit_summary():
             COUNTIF(action = 'NO_SALE') as no_sale_count,
             COUNTIF(action = 'CLOSE_OUT_EXACT') as exact_closeouts
         FROM `{PROJECT_ID}.{DATASET_ID}.CashEntries_raw`
-        WHERE processing_date BETWEEN @start_date AND @end_date
+        WHERE processing_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
         """
         drawer_row = list(bq_client.query(drawer_query, job_config=date_params).result())[0]
         drawer_collected = float(drawer_row.drawer_collected or 0)
@@ -4164,7 +4164,7 @@ def profit_summary():
                 category,
                 ROUND(SUM(abs_amount), 2) as total
             FROM `{bank_table}`
-            WHERE transaction_date BETWEEN @start_date AND @end_date
+            WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
                 AND transaction_type = 'debit'
             GROUP BY category
             ORDER BY total DESC
@@ -4181,7 +4181,7 @@ def profit_summary():
             SELECT
                 COALESCE(SUM(abs_amount), 0) as total_deposits
             FROM `{bank_table}`
-            WHERE transaction_date BETWEEN @start_date AND @end_date
+            WHERE transaction_date BETWEEN PARSE_DATE('%Y-%m-%d', @start_date) AND PARSE_DATE('%Y-%m-%d', @end_date)
                 AND transaction_type = 'credit'
                 AND (LOWER(category) LIKE '%cash deposit%'
                      OR LOWER(category) LIKE '%cash account transfer%'
@@ -4466,7 +4466,7 @@ def reconcile_checks():
                 SET category = @category,
                     category_source = @source,
                     vendor_normalized = @vendor
-                WHERE transaction_date = @txn_date
+                WHERE transaction_date = PARSE_DATE('%Y-%m-%d', @txn_date)
                   AND description = @desc
                   AND amount = @amt
             """

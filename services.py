@@ -1098,7 +1098,7 @@ class BigQueryLoader:
 
         delete_sql = f"""
         DELETE FROM `{table_ref}`
-        WHERE processing_date = @processing_date
+        WHERE processing_date = PARSE_DATE('%Y-%m-%d', @processing_date)
         """
         job_config = bigquery.QueryJobConfig(query_parameters=[
             bigquery.ScalarQueryParameter("processing_date", "STRING", processing_date),

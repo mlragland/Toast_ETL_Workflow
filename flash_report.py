@@ -75,7 +75,7 @@ class FlashReport:
             COALESCE(SUM(tip), 0) AS tips,
             COALESCE(SUM(gratuity), 0) AS gratuity
         FROM {self.table_prefix}.OrderDetails_raw`
-        WHERE processing_date = @d
+        WHERE processing_date = PARSE_DATE('%Y-%m-%d', @d)
           AND (voided IS NULL OR voided = 'false')
         """
         cfg = bigquery.QueryJobConfig(query_parameters=[
@@ -101,7 +101,7 @@ class FlashReport:
             COALESCE(SUM(tip), 0) AS tips,
             COALESCE(SUM(gratuity), 0) AS gratuity
         FROM {self.table_prefix}.OrderDetails_raw`
-        WHERE processing_date = @d
+        WHERE processing_date = PARSE_DATE('%Y-%m-%d', @d)
           AND (voided IS NULL OR voided = 'false')
         GROUP BY server
         ORDER BY total_revenue DESC
@@ -139,7 +139,7 @@ class FlashReport:
             END AS section,
             SUM(ABS(amount)) AS total
         FROM {self.table_prefix}.BankTransactions_raw`
-        WHERE transaction_date = @d
+        WHERE transaction_date = PARSE_DATE('%Y-%m-%d', @d)
           AND transaction_type = 'debit'
           AND category != 'Uncategorized'
         GROUP BY section
@@ -177,7 +177,7 @@ class FlashReport:
         bank_sql = f"""
         SELECT COALESCE(SUM(amount), 0) AS cash_deposited
         FROM {self.table_prefix}.BankTransactions_raw`
-        WHERE transaction_date = @d
+        WHERE transaction_date = PARSE_DATE('%Y-%m-%d', @d)
           AND amount > 0
           AND (LOWER(description) LIKE '%counter credit%'
                OR LOWER(description) LIKE '%cash deposit%')
