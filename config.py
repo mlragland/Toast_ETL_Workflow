@@ -706,6 +706,7 @@ EVENT_VENDOR_MAP: Dict[str, Any] = {
     "JOE HAND": "saturday_rnb",
     "DJBOOF": "saturday_rnb",
     "Matthew Hayes": "friday_106",
+    "Sandeep Sharda": ["friday_106", "saturday_rnb"],
     "Justin Roundtree": "friday_106",
     "The Play Hooky": "sunday_brunch",
     # "JIJO RAJAN": Mon (dark) — excluded, one-off
