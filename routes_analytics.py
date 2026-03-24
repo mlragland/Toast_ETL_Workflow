@@ -4578,3 +4578,50 @@ def api_vendor_tracker():
     except Exception as e:
         logger.error(f"Vendor tracker error: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# ─── Teller Bank Sync API ────────────────────────────────────────────────────
+
+@bp.route("/api/teller-sync", methods=["POST"])
+def api_teller_sync():
+    """
+    Trigger bank transaction sync from Teller API.
+
+    Request body (optional):
+        {"from_date": "2026-03-19"}  // override auto-detected start date
+
+    Pulls posted transactions from BofA via Teller, categorizes using
+    existing 629 rules + check register, and MERGEs into BigQuery.
+    Preserves manual categorizations (won't overwrite category_source='manual').
+
+    Scheduled daily at 7:30 AM CST via Cloud Scheduler.
+    """
+    import re
+    from routes_etl import require_auth
+
+    # Auth check (reuse ETL auth)
+    auth_header = request.headers.get("Authorization", "")
+    scheduler = request.headers.get("X-Scheduler-Source", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    import os
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or scheduler or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    force_from = data.get("from_date")
+
+    if force_from and not re.match(r"^\d{4}-\d{2}-\d{2}$", force_from):
+        return jsonify({"error": f"Invalid from_date format: {force_from}. Use YYYY-MM-DD"}), 400
+
+    try:
+        from teller_sync import TellerSync
+        ts = TellerSync()
+        result = ts.sync(force_from_date=force_from)
+        return jsonify(result), 200 if result["status"] == "success" else 500
+
+    except Exception as e:
+        logger.error(f"Teller sync error: {e}")
+        return jsonify({"error": str(e)}), 500
