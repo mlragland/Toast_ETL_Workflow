@@ -18,8 +18,8 @@ import requests
 import pandas as pd
 from google.cloud import bigquery
 
-from config import PROJECT_ID, DATASET_ID
-from services import BofACSVParser, BankCategoryManager, CheckRegisterSync, BigQueryLoader, SecretManager
+from config import PROJECT_ID, DATASET_ID, ALERT_WEBHOOK_URL
+from services import BofACSVParser, BankCategoryManager, CheckRegisterSync, BigQueryLoader, SecretManager, AlertManager
 
 logger = logging.getLogger(__name__)
 
