@@ -145,14 +145,14 @@ class TellerSync:
 
         # Get rules from BigQuery
         cat_manager = BankCategoryManager(self.bq, DATASET_ID)
-        rules = cat_manager.get_rules()
+        rules = cat_manager.list_rules()
 
         # Get check register
         check_register = None
         try:
             register_sync = CheckRegisterSync(self.bq, DATASET_ID)
             register_sync.sync_from_sheet()
-            check_register = register_sync.get_register_dict()
+            check_register = register_sync.get_lookup()
         except Exception as e:
             logger.warning(f"Check register sync skipped: {e}")
 
