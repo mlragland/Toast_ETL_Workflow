@@ -58,96 +58,16 @@ def _nav_css(theme: str = "dark") -> str:
 
 def _bank_review_html() -> str:
     """Return self-contained HTML for the bank transaction review dashboard."""
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOV3 Bank Transaction Review</title>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;color:#1a1a2e;min-height:100vh}
-.header{background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff;padding:24px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
-.header h1{font-size:1.5rem;font-weight:700;letter-spacing:0.5px}
-.header .subtitle{font-size:0.85rem;opacity:0.7}
-.container{max-width:1400px;margin:0 auto;padding:24px}
-.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}
-.kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
-.kpi-card .label{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:4px}
-.kpi-card .value{font-size:1.8rem;font-weight:700}
-.kpi-card .value.warn{color:#e74c3c}
-.kpi-card .value.ok{color:#27ae60}
-.kpi-card .value.info{color:#2980b9}
-.filter-bar{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
-.filter-bar .field{display:flex;flex-direction:column;gap:4px}
-.filter-bar .field label{font-size:0.75rem;font-weight:600;color:#555;text-transform:uppercase}
-.filter-bar input,.filter-bar select{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
-.filter-bar input:focus,.filter-bar select:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
-.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
-.btn-primary{background:#6366f1;color:#fff}.btn-primary:hover{background:#4f46e5}
-.btn-success{background:#10b981;color:#fff}.btn-success:hover{background:#059669}
-.btn-secondary{background:#e5e7eb;color:#374151}.btn-secondary:hover{background:#d1d5db}
-.table-wrap{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow:hidden}
-.table-info{padding:12px 20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;color:#666;flex-wrap:wrap;gap:8px}
-table{width:100%;border-collapse:collapse;font-size:0.85rem}
-thead{background:#f8f9fa}
-th{padding:10px 14px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;white-space:nowrap}
-td{padding:10px 14px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
-tr:hover{background:#f8f9ff}
-.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
-.amount.debit{color:#e74c3c}
-.amount.credit{color:#27ae60}
-.badge{display:inline-block;padding:2px 8px;border-radius:9999px;font-size:0.7rem;font-weight:600;text-transform:uppercase}
-.badge-uncat{background:#fee2e2;color:#991b1b}
-.badge-auto{background:#dbeafe;color:#1e40af}
-.badge-manual{background:#d1fae5;color:#065f46}
-td select{padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:0.8rem;max-width:260px;width:100%}
-td input[type="text"]{padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:0.8rem;width:140px}
-td input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
-.row-save{padding:4px 12px;border:none;border-radius:6px;font-size:0.75rem;font-weight:600;cursor:pointer;background:#6366f1;color:#fff;transition:all 0.15s}
-.row-save:hover{background:#4f46e5}
-.row-save:disabled{background:#c7c9d1;cursor:default}
-.pagination{display:flex;justify-content:center;align-items:center;gap:12px;padding:16px;flex-wrap:wrap}
-.pagination button{padding:8px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:0.85rem;transition:all 0.15s}
-.pagination button:hover:not(:disabled){background:#f3f4f6}
-.pagination button:disabled{opacity:0.4;cursor:default}
-.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
-.toast.success{background:#10b981}
-.toast.error{background:#ef4444}
-.toast.info{background:#6366f1}
-@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
-.loading-overlay.active{display:flex}
-.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
-.desc-cell{max-width:480px;word-break:break-word;white-space:normal;font-size:0.8rem;line-height:1.3}
-.rule-kw{padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:0.75rem;width:120px;display:none}
-@media(max-width:768px){.container{padding:12px}.header{padding:16px}.kpi-row{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}}
-.upload-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.upload-card .upload-label{font-size:0.85rem;font-weight:600;color:#374151}
-.upload-card input[type="file"]{font-size:0.85rem}
-.upload-card .btn-upload{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;background:#6366f1;color:#fff;transition:all 0.15s}
-.upload-card .btn-upload:hover{background:#4f46e5}
-.upload-card .btn-upload:disabled{background:#c7c9d1;cursor:default}
-.upload-result{margin-top:8px;padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:0.82rem;color:#166534;display:none;width:100%}
-.upload-result .result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:8px}
-.upload-result .result-item{font-size:0.8rem}.upload-result .result-item strong{color:#15803d}
-''' + _nav_css("light") + '''
-</style>
-</head>
-<body>
-<div class="header">
+    from design_system import page_shell
+
+    body = '''<div class="header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
   <div>
     <h1>LOV3 Bank Transaction Review</h1>
     <div class="subtitle">Categorize uncategorized bank transactions and create auto-categorization rules</div>
   </div>
   <button class="btn-success" onclick="saveAll()" id="saveAllBtn" style="padding:10px 24px;border:none;border-radius:8px;font-size:0.9rem;font-weight:700;cursor:pointer;color:#fff">Save All Changes</button>
 </div>
-''' + _nav_html("/bank-review", "light") + '''
 
-<div class="container">
   <div class="kpi-row">
     <div class="kpi-card"><div class="label">Uncategorized</div><div class="value warn" id="kpiUncat">--</div></div>
     <div class="kpi-card"><div class="label">Uncategorized $</div><div class="value warn" id="kpiUncatAmt">--</div></div>
@@ -234,12 +154,69 @@ td input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
       <button onclick="nextPage()" id="btnNext" disabled>Next &raquo;</button>
     </div>
   </div>
-</div>
 
 <div class="toast-container" id="toasts"></div>
-<div class="loading-overlay" id="loadingOverlay"><div class="loading-box"><div class="spinner" style="border-color:#6366f1;border-top-color:transparent;width:32px;height:32px;margin:0 auto 12px"></div><div>Loading...</div></div></div>
+<div class="loading-overlay" id="loadingOverlay"><div class="loading-box"><div class="spinner" style="border-color:#6366f1;border-top-color:transparent;width:32px;height:32px;margin:0 auto 12px"></div><div>Loading...</div></div></div>'''
 
-<script>
+    extra_css = '''
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}
+.kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.kpi-card .label{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:4px}
+.kpi-card .value{font-size:1.8rem;font-weight:700}
+.kpi-card .value.warn{color:#e74c3c}
+.kpi-card .value.ok{color:#27ae60}
+.kpi-card .value.info{color:#2980b9}
+.filter-bar{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.filter-bar .field{display:flex;flex-direction:column;gap:4px}
+.filter-bar .field label{font-size:0.75rem;font-weight:600;color:#555;text-transform:uppercase}
+.filter-bar input,.filter-bar select{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
+.filter-bar input:focus,.filter-bar select:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
+.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
+.btn-secondary{background:#e5e7eb;color:#374151}.btn-secondary:hover{background:#d1d5db}
+.table-wrap{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow:hidden}
+.table-info{padding:12px 20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;color:#666;flex-wrap:wrap;gap:8px}
+thead{background:#f8f9fa}
+.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
+.amount.debit{color:#e74c3c}
+.amount.credit{color:#27ae60}
+.badge-uncat{background:#fee2e2;color:#991b1b}
+.badge-auto{background:#dbeafe;color:#1e40af}
+.badge-manual{background:#d1fae5;color:#065f46}
+td select{padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:0.8rem;max-width:260px;width:100%}
+td input[type="text"]{padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:0.8rem;width:140px}
+td input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
+.row-save{padding:4px 12px;border:none;border-radius:6px;font-size:0.75rem;font-weight:600;cursor:pointer;background:#6366f1;color:#fff;transition:all 0.15s}
+.row-save:hover{background:#4f46e5}
+.row-save:disabled{background:#c7c9d1;cursor:default}
+.pagination{display:flex;justify-content:center;align-items:center;gap:12px;padding:16px;flex-wrap:wrap}
+.pagination button{padding:8px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:0.85rem;transition:all 0.15s}
+.pagination button:hover:not(:disabled){background:#f3f4f6}
+.pagination button:disabled{opacity:0.4;cursor:default}
+.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
+.toast.success{background:#10b981}
+.toast.error{background:#ef4444}
+.toast.info{background:#6366f1}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
+.loading-overlay.active{display:flex}
+.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
+.desc-cell{max-width:480px;word-break:break-word;white-space:normal;font-size:0.8rem;line-height:1.3}
+.rule-kw{padding:4px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:0.75rem;width:120px;display:none}
+.upload-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.upload-card .upload-label{font-size:0.85rem;font-weight:600;color:#374151}
+.upload-card input[type="file"]{font-size:0.85rem}
+.upload-card .btn-upload{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;background:#6366f1;color:#fff;transition:all 0.15s}
+.upload-card .btn-upload:hover{background:#4f46e5}
+.upload-card .btn-upload:disabled{background:#c7c9d1;cursor:default}
+.upload-result{margin-top:8px;padding:12px 16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;font-size:0.82rem;color:#166534;display:none;width:100%}
+.upload-result .result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-top:8px}
+.upload-result .result-item{font-size:0.8rem}.upload-result .result-item strong{color:#15803d}
+'''
+
+    js = r'''
 (function(){
   let transactions = [];
   let categories = [];
@@ -289,7 +266,7 @@ td input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
 
   function suggestKeyword(desc){
     // Take first 2-3 significant words as default keyword
-    const words = desc.toUpperCase().replace(/[^A-Z0-9\\s]/g,' ').split(/\\s+/).filter(w=>w.length>2);
+    const words = desc.toUpperCase().replace(/[^A-Z0-9\s]/g,' ').split(/\s+/).filter(w=>w.length>2);
     return words.slice(0,3).join(' ');
   }
 
@@ -573,84 +550,23 @@ td input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
   // Initial load
   loadData();
 })();
-</script>
-</body>
-</html>'''
+'''
+
+    return page_shell("LOV3 Bank Transaction Review", "/bank-review", body, extra_css, js)
 
 
 
 def _pnl_dashboard_html() -> str:
     """Return self-contained HTML for the P&L summary dashboard."""
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOV3 P&amp;L Summary</title>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;color:#1a1a2e;min-height:100vh}
-.header{background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff;padding:24px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
-.header h1{font-size:1.5rem;font-weight:700;letter-spacing:0.5px}
-.header .subtitle{font-size:0.85rem;opacity:0.7}
-''' + _nav_css("light") + '''
-.container{max-width:1400px;margin:0 auto;padding:24px}
-.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
-.kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
-.kpi-card .label{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:4px}
-.kpi-card .value{font-size:1.8rem;font-weight:700}
-.kpi-card .value.ok{color:#27ae60}
-.kpi-card .value.warn{color:#e74c3c}
-.kpi-card .value.info{color:#2980b9}
-.filter-bar{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
-.filter-bar .field{display:flex;flex-direction:column;gap:4px}
-.filter-bar .field label{font-size:0.75rem;font-weight:600;color:#555;text-transform:uppercase}
-.filter-bar input{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
-.filter-bar input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
-.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
-.btn-primary{background:#6366f1;color:#fff}.btn-primary:hover{background:#4f46e5}
-.section{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
-.section-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;font-size:1rem;font-weight:700;color:#1a1a2e}
-.section-body{padding:20px}
-table{width:100%;border-collapse:collapse;font-size:0.85rem}
-thead{background:#f8f9fa}
-th{padding:10px 14px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;white-space:nowrap}
-td{padding:10px 14px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
-tr:hover{background:#f8f9ff}
-.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
-.text-right{text-align:right}
-tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
-.warning-banner{background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:16px 20px;margin-bottom:24px;font-size:0.85rem;color:#92400e;display:none}
-.pct-bar-wrap{display:flex;align-items:center;gap:12px}
-.pct-bar{height:20px;border-radius:4px;min-width:2px}
-.pct-label{font-size:0.8rem;font-weight:600;white-space:nowrap;min-width:48px}
-.metric-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0}
-.metric-row:last-child{border-bottom:none}
-.metric-name{font-size:0.85rem;font-weight:500;color:#374151}
-.metric-val{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;font-size:0.9rem;font-weight:700}
-.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
-.loading-overlay.active{display:flex}
-.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
-.toast.success{background:#10b981}.toast.error{background:#ef4444}.toast.info{background:#6366f1}
-@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
-.hidden{display:none}
-@media(max-width:768px){.container{padding:12px}.header{padding:16px}.kpi-row{grid-template-columns:1fr 1fr}}
-</style>
-</head>
-<body>
-<div class="header">
+    from design_system import page_shell
+
+    body = '''<div class="header">
   <div>
     <h1>LOV3 P&amp;L Summary</h1>
     <div class="subtitle">Revenue, expenses, and profitability for a selected date range</div>
   </div>
 </div>
-''' + _nav_html("/pnl", "light") + '''
 
-<div class="container">
   <div class="filter-bar">
     <div class="field">
       <label>Start Date</label>
@@ -702,14 +618,54 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
     </div>
 
   </div>
-</div>
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box"><span class="spinner"></span> Loading P&amp;L data&hellip;</div>
 </div>
-<div class="toast-container" id="toastContainer"></div>
+<div class="toast-container" id="toastContainer"></div>'''
 
-<script>
+    extra_css = '''
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.kpi-card .label{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:4px}
+.kpi-card .value{font-size:1.8rem;font-weight:700}
+.kpi-card .value.ok{color:#27ae60}
+.kpi-card .value.warn{color:#e74c3c}
+.kpi-card .value.info{color:#2980b9}
+.filter-bar{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.filter-bar .field{display:flex;flex-direction:column;gap:4px}
+.filter-bar .field label{font-size:0.75rem;font-weight:600;color:#555;text-transform:uppercase}
+.filter-bar input{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
+.filter-bar input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
+.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
+.section{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
+.section-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;font-size:1rem;font-weight:700;color:#1a1a2e}
+.section-body{padding:20px}
+thead{background:#f8f9fa}
+.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
+.text-right{text-align:right}
+tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
+.warning-banner{background:#fef3c7;border:1px solid #f59e0b;border-radius:12px;padding:16px 20px;margin-bottom:24px;font-size:0.85rem;color:#92400e;display:none}
+.pct-bar-wrap{display:flex;align-items:center;gap:12px}
+.pct-bar{height:20px;border-radius:4px;min-width:2px}
+.pct-label{font-size:0.8rem;font-weight:600;white-space:nowrap;min-width:48px}
+.metric-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f0f0f0}
+.metric-row:last-child{border-bottom:none}
+.metric-name{font-size:0.85rem;font-weight:500;color:#374151}
+.metric-val{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;font-size:0.9rem;font-weight:700}
+.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
+.loading-overlay.active{display:flex}
+.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
+.toast.success{background:#10b981}.toast.error{background:#ef4444}.toast.info{background:#6366f1}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.hidden{display:none}
+'''
+
+    js = '''
 (function(){
   var $ = function(id){return document.getElementById(id)};
 
@@ -856,88 +812,23 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
   // Auto-load on page open
   loadReport();
 })();
-</script>
-</body>
-</html>'''
+'''
+
+    return page_shell("LOV3 P&L Summary", "/pnl", body, extra_css, js)
 
 
 
 def _analysis_dashboard_html() -> str:
     """Return self-contained HTML for the comprehensive analysis dashboard."""
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOV3 Comprehensive Analysis</title>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;color:#1a1a2e;min-height:100vh}
-.header{background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#fff;padding:24px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
-.header h1{font-size:1.5rem;font-weight:700;letter-spacing:0.5px}
-.header .subtitle{font-size:0.85rem;opacity:0.7}
-''' + _nav_css("light") + '''
-.container{max-width:1400px;margin:0 auto;padding:24px}
-.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
-.kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
-.kpi-card .label{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:4px}
-.kpi-card .value{font-size:1.8rem;font-weight:700}
-.kpi-card .value.ok{color:#27ae60}
-.kpi-card .value.warn{color:#e74c3c}
-.kpi-card .value.info{color:#2980b9}
-.filter-bar{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
-.filter-bar .field{display:flex;flex-direction:column;gap:4px}
-.filter-bar .field label{font-size:0.75rem;font-weight:600;color:#555;text-transform:uppercase}
-.filter-bar input{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
-.filter-bar input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
-.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
-.btn-primary{background:#6366f1;color:#fff}.btn-primary:hover{background:#4f46e5}
-.section{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
-.section-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;font-size:1rem;font-weight:700;color:#1a1a2e}
-.section-body{padding:20px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:0.85rem}
-thead{background:#f8f9fa}
-th{padding:10px 14px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;white-space:nowrap;cursor:pointer;user-select:none}
-th:hover{background:#eef0f4}
-th .sort-arrow{font-size:0.7rem;margin-left:4px;opacity:0.4}
-th.sorted .sort-arrow{opacity:1}
-td{padding:10px 14px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
-tr:hover{background:#f8f9ff}
-.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
-.text-right{text-align:right}
-tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
-.bar-cell{display:flex;align-items:center;gap:10px}
-.bar-track{flex:1;height:22px;background:#f0f0f0;border-radius:4px;overflow:hidden}
-.bar-fill{height:100%;border-radius:4px;min-width:2px}
-.bar-fill.indigo{background:linear-gradient(90deg,#6366f1,#818cf8)}
-.bar-fill.green{background:linear-gradient(90deg,#10b981,#34d399)}
-.bar-value{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;font-size:0.8rem;font-weight:600;min-width:70px;text-align:right}
-details.assumptions{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
-details.assumptions summary{padding:16px 20px;font-size:0.9rem;font-weight:700;cursor:pointer;color:#1a1a2e}
-details.assumptions .body{padding:0 20px 16px;font-size:0.82rem;color:#555;line-height:1.6}
-.hidden{display:none}
-.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
-.loading-overlay.active{display:flex}
-.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
-.toast.success{background:#10b981}.toast.error{background:#ef4444}.toast.info{background:#6366f1}
-@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
-@media(max-width:768px){.container{padding:12px}.header{padding:16px}.kpi-row{grid-template-columns:1fr 1fr}}
-</style>
-</head>
-<body>
-<div class="header">
+    from design_system import page_shell
+
+    body = '''<div class="header">
   <div>
     <h1>LOV3 Comprehensive Analysis</h1>
     <div class="subtitle">Monthly P&amp;L, revenue by day-of-week, and hourly revenue profile</div>
   </div>
 </div>
-''' + _nav_html("/analysis", "light") + '''
 
-<div class="container">
   <div class="filter-bar">
     <div class="field">
       <label>Start Date</label>
@@ -985,14 +876,59 @@ details.assumptions .body{padding:0 20px 16px;font-size:0.82rem;color:#555;line-
     </div>
 
   </div>
-</div>
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box"><span class="spinner"></span> Loading analysis&hellip;</div>
 </div>
-<div class="toast-container" id="toastContainer"></div>
+<div class="toast-container" id="toastContainer"></div>'''
 
-<script>
+    extra_css = '''
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.kpi-card .label{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:4px}
+.kpi-card .value{font-size:1.8rem;font-weight:700}
+.kpi-card .value.ok{color:#27ae60}
+.kpi-card .value.warn{color:#e74c3c}
+.kpi-card .value.info{color:#2980b9}
+.filter-bar{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.filter-bar .field{display:flex;flex-direction:column;gap:4px}
+.filter-bar .field label{font-size:0.75rem;font-weight:600;color:#555;text-transform:uppercase}
+.filter-bar input{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
+.filter-bar input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
+.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
+.section{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
+.section-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;font-size:1rem;font-weight:700;color:#1a1a2e}
+.section-body{padding:20px;overflow-x:auto}
+thead{background:#f8f9fa}
+th{cursor:pointer;user-select:none}
+th:hover{background:#eef0f4}
+th .sort-arrow{font-size:0.7rem;margin-left:4px;opacity:0.4}
+th.sorted .sort-arrow{opacity:1}
+.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
+.text-right{text-align:right}
+tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
+.bar-cell{display:flex;align-items:center;gap:10px}
+.bar-track{flex:1;height:22px;background:#f0f0f0;border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;min-width:2px}
+.bar-fill.indigo{background:linear-gradient(90deg,#6366f1,#818cf8)}
+.bar-fill.green{background:linear-gradient(90deg,#10b981,#34d399)}
+.bar-value{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;font-size:0.8rem;font-weight:600;min-width:70px;text-align:right}
+details.assumptions{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
+details.assumptions summary{padding:16px 20px;font-size:0.9rem;font-weight:700;cursor:pointer;color:#1a1a2e}
+details.assumptions .body{padding:0 20px 16px;font-size:0.82rem;color:#555;line-height:1.6}
+.hidden{display:none}
+.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
+.loading-overlay.active{display:flex}
+.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
+.toast.success{background:#10b981}.toast.error{background:#ef4444}.toast.info{background:#6366f1}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+'''
+
+    js = '''
 (function(){
   var $ = function(id){return document.getElementById(id)};
 
@@ -1173,82 +1109,23 @@ details.assumptions .body{padding:0 20px 16px;font-size:0.82rem;color:#555;line-
   // Auto-load on page open
   loadAnalysis();
 })();
-</script>
-</body>
-</html>'''
+'''
+
+    return page_shell("LOV3 Comprehensive Analysis", "/analysis", body, extra_css, js)
 
 
 
 def _cash_recon_html() -> str:
     """Return self-contained HTML for the cash reconciliation dashboard."""
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOV3 Cash Reconciliation</title>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f3f4f6;color:#1a1a2e;min-height:100vh}
-.header{background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#a78bfa 100%);color:#fff;padding:20px 24px}
-.header h1{font-size:1.5rem;font-weight:700}.header .subtitle{font-size:0.85rem;opacity:0.85;margin-top:4px}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:20px}
-.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
-.kpi-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
-.kpi-card .label{font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;margin-bottom:8px}
-.kpi-card .value{font-size:1.5rem;font-weight:700;font-family:"SF Mono",SFMono-Regular,Menlo,monospace}
-.kpi-card .sub{font-size:0.75rem;color:#6b7280;margin-top:4px}
-.kpi-card .value.good{color:#10b981}.kpi-card .value.warn{color:#f59e0b}.kpi-card .value.bad{color:#ef4444}
-.filter-bar{display:flex;gap:12px;align-items:center;margin-bottom:24px;flex-wrap:wrap}
-.filter-bar label{font-size:0.8rem;font-weight:600;color:#374151}
-.filter-bar input{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
-.filter-bar input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
-.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
-.btn-primary{background:#6366f1;color:#fff}.btn-primary:hover{background:#4f46e5}
-.section{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
-.section-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;font-size:1rem;font-weight:700;color:#1a1a2e}
-.section-body{padding:20px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:0.85rem}
-thead{background:#f8f9fa}
-th{padding:10px 14px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;white-space:nowrap}
-td{padding:10px 14px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
-tr:hover{background:#f8f9ff}
-.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
-.text-right{text-align:right}
-tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
-.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:0.75rem;font-weight:600}
-.badge-ok{background:#d1fae5;color:#065f46}
-.badge-watch{background:#fef3c7;color:#92400e}
-.badge-high{background:#fee2e2;color:#991b1b}
-.flag-icon{color:#ef4444;font-weight:700}
-.alert-banner{background:#fee2e2;border:1px solid #ef4444;border-radius:12px;padding:16px 20px;margin-bottom:24px;font-size:0.85rem;color:#991b1b}
-.alert-banner ul{margin:8px 0 0 20px}.alert-banner li{margin:4px 0}
-.alert-banner.hidden{display:none}
-.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
-.loading-overlay.active{display:flex}
-.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
-.toast.success{background:#10b981}.toast.error{background:#ef4444}.toast.info{background:#6366f1}
-@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
-.highlight-row{background:#fef3c7 !important}
-@media(max-width:768px){.container{padding:12px}.header{padding:16px}.kpi-row{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column;align-items:stretch}.nav-bar{padding:0 8px}.nav-bar a{padding:10px 12px;font-size:0.75rem}}
-@media(max-width:480px){.kpi-row{grid-template-columns:1fr}.kpi-card{padding:14px}.kpi-card .value{font-size:1.2rem}.header h1{font-size:1.2rem}}
-</style>
-</head>
-<body>
-<div class="header">
+    from design_system import page_shell
+
+    body = '''<div class="header">
   <div>
     <h1>LOV3 Cash Reconciliation</h1>
     <div class="subtitle">POS collections vs bank deposits &mdash; credit card settlement &amp; cash tracking</div>
   </div>
 </div>
-''' + _nav_html("/cash-recon", "dark") + '''
 
-<div class="container">
   <div class="filter-bar">
     <label>From</label>
     <input type="date" id="startDate">
@@ -1305,14 +1182,54 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
       <th class="amount">CAP_IN_PROG #</th><th class="amount">CAP_IN_PROG $</th>
     </tr></thead><tbody></tbody></table></div>
   </div>
-</div>
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box"><span class="spinner"></span> Loading reconciliation data&hellip;</div>
 </div>
-<div class="toast-container" id="toastContainer"></div>
+<div class="toast-container" id="toastContainer"></div>'''
 
-<script>
+    extra_css = '''
+.header{background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#a78bfa 100%)}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.kpi-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.kpi-card .label{font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#6b7280;margin-bottom:8px}
+.kpi-card .value{font-size:1.5rem;font-weight:700;font-family:"SF Mono",SFMono-Regular,Menlo,monospace}
+.kpi-card .sub{font-size:0.75rem;color:#6b7280;margin-top:4px}
+.kpi-card .value.good{color:#10b981}.kpi-card .value.warn{color:#f59e0b}.kpi-card .value.bad{color:#ef4444}
+.filter-bar{display:flex;gap:12px;align-items:center;margin-bottom:24px;flex-wrap:wrap}
+.filter-bar label{font-size:0.8rem;font-weight:600;color:#374151}
+.filter-bar input{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
+.filter-bar input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.1)}
+.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
+.section{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
+.section-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;font-size:1rem;font-weight:700;color:#1a1a2e}
+.section-body{padding:20px;overflow-x:auto}
+thead{background:#f8f9fa}
+.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
+.text-right{text-align:right}
+tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
+.badge-ok{background:#d1fae5;color:#065f46}
+.badge-watch{background:#fef3c7;color:#92400e}
+.badge-high{background:#fee2e2;color:#991b1b}
+.flag-icon{color:#ef4444;font-weight:700}
+.alert-banner{background:#fee2e2;border:1px solid #ef4444;border-radius:12px;padding:16px 20px;margin-bottom:24px;font-size:0.85rem;color:#991b1b}
+.alert-banner ul{margin:8px 0 0 20px}.alert-banner li{margin:4px 0}
+.alert-banner.hidden{display:none}
+.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
+.loading-overlay.active{display:flex}
+.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
+.toast.success{background:#10b981}.toast.error{background:#ef4444}.toast.info{background:#6366f1}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.highlight-row{background:#fef3c7 !important}
+.bad{color:#ef4444}
+@media(max-width:480px){.kpi-row{grid-template-columns:1fr}.kpi-card{padding:14px}.kpi-card .value{font-size:1.2rem}.header h1{font-size:1.2rem}}
+'''
+
+    js = '''
 (function(){
   // Default date range: 6 months back -> today
   const today = new Date();
@@ -1517,87 +1434,23 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
   // Auto-load on page open
   loadRecon();
 })();
-</script>
-</body>
-</html>'''
+'''
+
+    return page_shell("LOV3 Cash Reconciliation", "/cash-recon", body, extra_css, js)
 
 
 
 def _menu_mix_html() -> str:
     """Return self-contained HTML for the menu mix analysis dashboard."""
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOV3 Menu Mix Analysis</title>
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;color:#1a1a2e;min-height:100vh}
-.header{background:linear-gradient(135deg,#4c1d95,#7c3aed,#6d28d9);color:#fff;padding:24px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
-.header h1{font-size:1.5rem;font-weight:700;letter-spacing:0.5px}
-.header .subtitle{font-size:0.85rem;opacity:0.7}
-''' + _nav_css("light") + '''
-.container{max-width:1400px;margin:0 auto;padding:24px}
-.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
-.kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
-.kpi-card .label{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:4px}
-.kpi-card .value{font-size:1.8rem;font-weight:700}
-.kpi-card .value.ok{color:#27ae60}
-.kpi-card .value.warn{color:#f59e0b}
-.kpi-card .value.danger{color:#e74c3c}
-.kpi-card .value.info{color:#7c3aed}
-.filter-bar{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
-.filter-bar .field{display:flex;flex-direction:column;gap:4px}
-.filter-bar .field label{font-size:0.75rem;font-weight:600;color:#555;text-transform:uppercase}
-.filter-bar input{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
-.filter-bar input:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,0.1)}
-.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
-.btn-primary{background:#7c3aed;color:#fff}.btn-primary:hover{background:#6d28d9}
-.section{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
-.section-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;font-size:1rem;font-weight:700;color:#1a1a2e}
-.section-body{padding:20px;overflow-x:auto}
-table{width:100%;border-collapse:collapse;font-size:0.85rem}
-thead{background:#f8f9fa}
-th{padding:10px 14px;text-align:left;font-weight:600;color:#374151;border-bottom:2px solid #e5e7eb;white-space:nowrap}
-td{padding:10px 14px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
-tr:hover{background:#f8f9ff}
-.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
-.text-right{text-align:right}
-tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
-.bar-cell{display:flex;align-items:center;gap:10px}
-.bar-track{flex:1;height:22px;background:#f0f0f0;border-radius:4px;overflow:hidden}
-.bar-fill{height:100%;border-radius:4px;min-width:2px}
-.bar-fill.purple{background:linear-gradient(90deg,#7c3aed,#a78bfa)}
-.bar-fill.indigo{background:linear-gradient(90deg,#6366f1,#818cf8)}
-.bar-fill.green{background:linear-gradient(90deg,#10b981,#34d399)}
-.bar-fill.amber{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
-.bar-value{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;font-size:0.8rem;font-weight:600;min-width:70px;text-align:right}
-.rank-num{font-weight:700;color:#7c3aed}
-.peak-row{background:#f0fdf4!important}
-.hidden{display:none}
-.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
-.loading-overlay.active{display:flex}
-.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
-.spinner{display:inline-block;width:16px;height:16px;border:2px solid #7c3aed;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
-.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
-.toast.success{background:#10b981}.toast.error{background:#ef4444}.toast.info{background:#7c3aed}
-@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
-@media(max-width:768px){.container{padding:12px}.header{padding:16px}.kpi-row{grid-template-columns:1fr 1fr}}
-</style>
-</head>
-<body>
-<div class="header">
+    from design_system import page_shell
+
+    body = '''<div class="header">
   <div>
     <h1>LOV3 Menu Mix Analysis</h1>
     <div class="subtitle">Item performance, category breakdown, daypart &amp; day-of-week analysis</div>
   </div>
 </div>
-''' + _nav_html("/menu-mix", "light") + '''
 
-<div class="container">
   <div class="filter-bar">
     <div class="field"><label>Start Date</label><input type="date" id="startDate"></div>
     <div class="field"><label>End Date</label><input type="date" id="endDate"></div>
@@ -1630,14 +1483,59 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
     <div class="section-header">Hourly Revenue Profile</div>
     <div class="section-body" id="hourlyBody"></div>
   </div>
-</div>
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box"><span class="spinner"></span> Loading menu mix data&hellip;</div>
 </div>
-<div class="toast-container" id="toastContainer"></div>
+<div class="toast-container" id="toastContainer"></div>'''
 
-<script>
+    extra_css = '''
+.header{background:linear-gradient(135deg,#4c1d95,#7c3aed,#6d28d9)}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.kpi-card{background:#fff;border-radius:12px;padding:20px 24px;box-shadow:0 1px 3px rgba(0,0,0,0.08)}
+.kpi-card .label{font-size:0.8rem;text-transform:uppercase;letter-spacing:0.5px;color:#666;margin-bottom:4px}
+.kpi-card .value{font-size:1.8rem;font-weight:700}
+.kpi-card .value.ok{color:#27ae60}
+.kpi-card .value.warn{color:#f59e0b}
+.kpi-card .value.danger{color:#e74c3c}
+.kpi-card .value.info{color:#7c3aed}
+.filter-bar{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.filter-bar .field{display:flex;flex-direction:column;gap:4px}
+.filter-bar .field label{font-size:0.75rem;font-weight:600;color:#555;text-transform:uppercase}
+.filter-bar input{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.875rem;background:#fff}
+.filter-bar input:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,0.1)}
+.filter-bar button{padding:8px 20px;border:none;border-radius:8px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.15s}
+.btn-primary{background:#7c3aed;color:#fff}.btn-primary:hover{background:#6d28d9}
+.section{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:24px;overflow:hidden}
+.section-header{padding:16px 20px;border-bottom:1px solid #e5e7eb;font-size:1rem;font-weight:700;color:#1a1a2e}
+.section-body{padding:20px;overflow-x:auto}
+thead{background:#f8f9fa}
+.amount{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;text-align:right;white-space:nowrap}
+.text-right{text-align:right}
+tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
+.bar-cell{display:flex;align-items:center;gap:10px}
+.bar-track{flex:1;height:22px;background:#f0f0f0;border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px;min-width:2px}
+.bar-fill.purple{background:linear-gradient(90deg,#7c3aed,#a78bfa)}
+.bar-fill.indigo{background:linear-gradient(90deg,#6366f1,#818cf8)}
+.bar-fill.green{background:linear-gradient(90deg,#10b981,#34d399)}
+.bar-fill.amber{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+.bar-value{font-family:"SF Mono",SFMono-Regular,Menlo,monospace;font-size:0.8rem;font-weight:600;min-width:70px;text-align:right}
+.rank-num{font-weight:700;color:#7c3aed}
+.peak-row{background:#f0fdf4!important}
+.hidden{display:none}
+.loading-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.2);z-index:9998;align-items:center;justify-content:center}
+.loading-overlay.active{display:flex}
+.loading-box{background:#fff;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.15);text-align:center}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #7c3aed;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast-container{position:fixed;top:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:8px;color:#fff;font-size:0.875rem;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,0.15);animation:slideIn 0.3s ease}
+.toast.success{background:#10b981}.toast.error{background:#ef4444}.toast.info{background:#7c3aed}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+'''
+
+    js = '''
 (function(){
   var $=function(id){return document.getElementById(id)};
   var fmt=function(v){return v==null?'--':'$'+Number(v).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})};
@@ -1776,27 +1674,25 @@ tfoot td{font-weight:700;border-top:2px solid #e5e7eb}
   // Auto-load on page open
   loadMenuMix();
 })();
-</script>
-</body>
-</html>'''
+'''
+
+    return page_shell("LOV3 Menu Mix Analysis", "/menu-mix", body, extra_css, js)
 
 
 
 def _events_calendar_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOV3 Events &amp; Promotional Calendar</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e5e5;min-height:100vh}
-.header{background:linear-gradient(135deg,#b91c1c,#dc2626,#f97316);padding:1.5rem 2rem;text-align:center}
+    from design_system import page_shell
+
+    extra_css = """
+body{background:#111;color:#e5e5e5}
+.nav-bar{background:#1a1a2e;border-bottom:none;padding:0 16px}
+.nav-bar a{color:#94a3b8;padding:12px 16px;font-size:0.82rem;font-weight:500;border-bottom:2px solid transparent;border-radius:0}
+.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.nav-bar a.active{color:#fff;border-bottom-color:#6366f1;background:rgba(99,102,241,0.1)}
+.header{background:linear-gradient(135deg,#b91c1c,#dc2626,#f97316);padding:1.5rem 2rem;text-align:center;border-radius:0}
 .header h1{font-size:1.6rem;font-weight:700;color:#fff;letter-spacing:0.5px}
 .header p{color:rgba(255,255,255,.8);font-size:.85rem;margin-top:.25rem}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:1.5rem}
+.container{max-width:1400px}
 .year-toggle{display:flex;gap:.5rem;justify-content:center;margin-bottom:1.5rem}
 .year-btn{padding:.5rem 1.5rem;border:2px solid #444;background:transparent;color:#ccc;border-radius:8px;cursor:pointer;font-size:.9rem;font-weight:600;transition:all .15s}
 .year-btn:hover{border-color:#dc2626;color:#fff}
@@ -1808,9 +1704,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .kpi-card .value.red{color:#dc2626}
 .kpi-card .value.green{color:#22c55e}
 .kpi-card .sub{font-size:.72rem;color:#666;margin-top:.25rem}
-.section{margin-bottom:2rem}
+.section{margin-bottom:2rem;background:transparent;border:none;box-shadow:none}
 .section-title{font-size:1.1rem;font-weight:700;margin-bottom:1rem;color:#fff;border-bottom:2px solid #dc2626;padding-bottom:.5rem;display:inline-block}
-/* Calendar grid */
 .cal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1.5rem;margin-bottom:2rem}
 @media(max-width:900px){.cal-grid{grid-template-columns:1fr}}
 .cal-month{background:#1e1e1e;border:1px solid #333;border-radius:10px;padding:1rem;overflow:hidden}
@@ -1830,7 +1725,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .dot-sports{background:#22c55e}
 .cal-day .tooltip{display:none;position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:.4rem .6rem;border-radius:6px;font-size:.68rem;white-space:nowrap;z-index:10;pointer-events:none}
 .cal-day:hover .tooltip{display:block}
-/* Tables */
 table{width:100%;border-collapse:collapse;font-size:.82rem}
 th{text-align:left;padding:.6rem .8rem;background:#1a1a1a;color:#888;font-weight:600;text-transform:uppercase;font-size:.7rem;letter-spacing:.5px;border-bottom:1px solid #333}
 td{padding:.6rem .8rem;border-bottom:1px solid #222;color:#ccc}
@@ -1844,22 +1738,19 @@ tr:hover td{background:#1a1a1a}
 .bar-cell{position:relative}
 .bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:0 4px 4px 0;opacity:.15}
 .bar-fill-purple{background:#a855f7}
-/* Insights */
 .insights-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem}
 .insight-card{background:#1e1e1e;border:1px solid #333;border-radius:10px;padding:1.2rem}
 .insight-card .insight-title{font-weight:700;color:#f97316;margin-bottom:.5rem;font-size:.9rem}
 .insight-card .insight-text{font-size:.82rem;color:#bbb;line-height:1.5}
 .loading{text-align:center;color:#666;padding:3rem;font-size:.9rem}
-</style>
-</head>
-<body>
+"""
+
+    body = """
 <div class="header">
   <h1>LOV3 Events &amp; Promotional Calendar</h1>
   <p>Forward-looking event planning &amp; historical revenue overlay</p>
 </div>
-''' + _nav_html("/events", "dark") + '''
 
-<div class="container">
   <div class="year-toggle">
     <button class="year-btn" data-year="2025" onclick="window.loadEvents(2025)">2025</button>
     <button class="year-btn" data-year="2026" onclick="window.loadEvents(2026)">2026</button>
@@ -1886,9 +1777,9 @@ tr:hover td{background:#1a1a1a}
     <div class="section-title">Insights &amp; Intel</div>
     <div id="insightsSection" class="insights-grid"><div class="loading">Loading...</div></div>
   </div>
-</div>
+"""
 
-<script>
+    js = """ \
 (function(){
   const $=id=>document.getElementById(id);
   const fmt$=v=>'$'+(v>=1000?(v/1000).toFixed(1)+'K':Math.round(v));
@@ -2066,28 +1957,22 @@ tr:hover td{background:#1a1a1a}
 
   // Auto-load current year
   loadEvents(currentYear);
-})();
-</script>
-</body>
-</html>'''
+})();"""
 
-
-
+    return page_shell("LOV3 Events & Promotional Calendar", "/events", body, extra_css, js)
 def _customer_loyalty_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOV3 Guest Intelligence</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e5e5;min-height:100vh}
-.header{background:linear-gradient(135deg,#0d9488,#14b8a6,#2dd4bf);padding:1.5rem 2rem;text-align:center}
+    from design_system import page_shell
+
+    extra_css = """
+body{background:#111;color:#e5e5e5}
+.nav-bar{background:#1a1a2e;border-bottom:none;padding:0 16px}
+.nav-bar a{color:#94a3b8;padding:12px 16px;font-size:0.82rem;font-weight:500;border-bottom:2px solid transparent;border-radius:0}
+.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.nav-bar a.active{color:#fff;border-bottom-color:#6366f1;background:rgba(99,102,241,0.1)}
+.header{background:linear-gradient(135deg,#0d9488,#14b8a6,#2dd4bf);padding:1.5rem 2rem;text-align:center;border-radius:0}
 .header h1{font-size:1.6rem;font-weight:700;color:#fff;letter-spacing:0.5px}
 .header p{color:rgba(255,255,255,.8);font-size:.85rem;margin-top:.25rem}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:1.5rem}
+.container{max-width:1400px}
 .filter-bar{display:flex;gap:1rem;align-items:center;margin-bottom:1.5rem;flex-wrap:wrap}
 .filter-bar label{font-size:.82rem;color:#999}
 .filter-bar input[type=date]{background:#1e1e1e;border:1px solid #444;color:#fff;padding:.4rem .6rem;border-radius:6px;font-size:.82rem}
@@ -2107,7 +1992,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .seg-card .seg-title{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:.5rem}
 .seg-card .seg-count{font-size:1.6rem;font-weight:700;color:#fff}
 .seg-card .seg-detail{font-size:.75rem;color:#888;margin-top:.3rem}
-.section{margin-bottom:2rem}
+.section{margin-bottom:2rem;background:transparent;border:none;box-shadow:none}
 .section-title{font-size:1.05rem;font-weight:700;margin-bottom:1rem;color:#fff;border-bottom:2px solid #14b8a6;padding-bottom:.5rem;display:inline-block}
 table{width:100%;border-collapse:collapse;font-size:.8rem}
 th{text-align:left;padding:.55rem .7rem;background:#1a1a1a;color:#888;font-weight:600;text-transform:uppercase;font-size:.68rem;letter-spacing:.5px;border-bottom:1px solid #333}
@@ -2131,16 +2016,14 @@ tr:hover td{background:#1a1a1a}
 @media(max-width:900px){.two-col{grid-template-columns:1fr}}
 .loading{text-align:center;color:#666;padding:3rem;font-size:.9rem}
 .empty{text-align:center;color:#555;padding:2rem;font-size:.85rem;font-style:italic}
-</style>
-</head>
-<body>
+"""
+
+    body = """
 <div class="header">
   <h1>LOV3 Guest Intelligence</h1>
   <p>Card-based guest segmentation, visit behavior &amp; revenue analytics</p>
 </div>
-''' + _nav_html("/loyalty", "dark") + '''
 
-<div class="container">
   <div class="filter-bar">
     <label>From</label>
     <input type="date" id="startDate">
@@ -2160,9 +2043,9 @@ tr:hover td{background:#1a1a1a}
   <div id="contactsSection" class="section" style="display:none"></div>
   <div id="marketingSection" class="section" style="display:none"></div>
   <div id="sevenroomsSection" class="section" style="display:none"></div>
-</div>
+"""
 
-<script>
+    js = """ \
 (function(){
   const $ = id => document.getElementById(id);
   const fmt = n => Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
@@ -2440,26 +2323,21 @@ tr:hover td{background:#1a1a1a}
   }
 
   window.loadLoyalty();
-})();
-</script>
-</body>
-</html>'''
+})();"""
 
-
-
+    return page_shell("LOV3 Guest Intelligence", "/loyalty", body, extra_css, js)
 def _server_performance_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOV3 Server Performance</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
-.header{background:linear-gradient(135deg,#059669,#10b981,#34d399);padding:24px 32px;color:#fff}
+    from design_system import page_shell
+
+    extra_css = """
+body{background:#111;color:#e5e7eb}
+.nav-bar{background:#1a1a2e;border-bottom:none;padding:0 16px}
+.nav-bar a{color:#94a3b8;padding:12px 16px;font-size:0.82rem;font-weight:500;border-bottom:2px solid transparent;border-radius:0}
+.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.nav-bar a.active{color:#fff;border-bottom-color:#6366f1;background:rgba(99,102,241,0.1)}
+.header{background:linear-gradient(135deg,#059669,#10b981,#34d399);padding:24px 32px;color:#fff;border-radius:0}
 .header h1{font-size:1.5rem;font-weight:800;letter-spacing:-0.5px}.header .subtitle{font-size:0.85rem;opacity:0.9;margin-top:4px}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:24px}
+.container{max-width:1400px}
 .filter-bar{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .filter-bar label{font-size:0.82rem;color:#9ca3af;font-weight:600}
 .filter-bar input[type="date"]{background:#111;border:1px solid #444;color:#e5e7eb;padding:8px 12px;border-radius:8px;font-size:0.85rem}
@@ -2503,16 +2381,14 @@ tr.clickable:hover td{background:#0d3320}
 .loading-box{background:#1e1e1e;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.3);text-align:center;color:#ccc}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #10b981;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
-</style>
-</head>
-<body>
+"""
+
+    body = """
 <div class="header">
   <h1>LOV3 Server Performance</h1>
   <div class="subtitle">Server rankings, tip analysis, and individual performance breakdown</div>
 </div>
-''' + _nav_html("/servers", "dark") + '''
 
-<div class="container">
   <div class="filter-bar">
     <label>From</label><input type="date" id="startDate">
     <label>To</label><input type="date" id="endDate">
@@ -2558,13 +2434,13 @@ tr.clickable:hover td{background:#0d3320}
       <th>Server</th><th class="text-right">Total Tips</th><th class="text-right">Avg Tip %</th><th class="text-right">Total Gratuity</th>
     </tr></thead><tbody id="tipTable"></tbody></table></div>
   </div>
-</div>
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box"><span class="spinner"></span> Analyzing server data...</div>
 </div>
+"""
 
-<script>
+    js = """ \
 (function(){
   const $=id=>document.getElementById(id);
   const fmt=v=>'$'+Number(v||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
@@ -2663,26 +2539,21 @@ tr.clickable:hover td{background:#0d3320}
 
   window.loadServerPerf=loadServerPerf;
   loadServerPerf();
-})();
-</script>
-</body>
-</html>'''
+})();"""
 
-
-
+    return page_shell("LOV3 Server Performance", "/servers", body, extra_css, js)
 def _kitchen_speed_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOV3 Kitchen Speed</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
-.header{background:linear-gradient(135deg,#d97706,#f59e0b,#fbbf24);padding:24px 32px;color:#fff}
+    from design_system import page_shell
+
+    extra_css = """
+body{background:#111;color:#e5e7eb}
+.nav-bar{background:#1a1a2e;border-bottom:none;padding:0 16px}
+.nav-bar a{color:#94a3b8;padding:12px 16px;font-size:0.82rem;font-weight:500;border-bottom:2px solid transparent;border-radius:0}
+.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.nav-bar a.active{color:#fff;border-bottom-color:#6366f1;background:rgba(99,102,241,0.1)}
+.header{background:linear-gradient(135deg,#d97706,#f59e0b,#fbbf24);padding:24px 32px;color:#fff;border-radius:0}
 .header h1{font-size:1.5rem;font-weight:800;letter-spacing:-0.5px}.header .subtitle{font-size:0.85rem;opacity:0.9;margin-top:4px}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:24px}
+.container{max-width:1400px}
 .filter-bar{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .filter-bar label{font-size:0.82rem;color:#9ca3af;font-weight:600}
 .filter-bar input[type="date"]{background:#111;border:1px solid #444;color:#e5e7eb;padding:8px 12px;border-radius:8px;font-size:0.85rem}
@@ -2720,16 +2591,14 @@ tr:hover td{background:#1a1a1a}
 .loading-box{background:#1e1e1e;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.3);text-align:center;color:#ccc}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #f59e0b;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
-</style>
-</head>
-<body>
+"""
+
+    body = """
 <div class="header">
   <h1>LOV3 Kitchen Speed</h1>
   <div class="subtitle">Station performance, cook leaderboard, and fulfillment tracking</div>
 </div>
-''' + _nav_html("/kitchen", "dark") + '''
 
-<div class="container">
   <div class="filter-bar">
     <label>From</label><input type="date" id="startDate">
     <label>To</label><input type="date" id="endDate">
@@ -2765,13 +2634,13 @@ tr:hover td{background:#1a1a1a}
       <th>Week Starting</th><th class="text-right">Tickets</th><th class="text-right">Fulfilled</th><th>Avg Time</th>
     </tr></thead><tbody id="weeklyTable"></tbody></table></div>
   </div>
-</div>
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box"><span class="spinner"></span> Analyzing kitchen data...</div>
 </div>
+"""
 
-<script>
+    js = """ \
 (function(){
   const $=id=>document.getElementById(id);
 
@@ -2868,26 +2737,21 @@ tr:hover td{background:#1a1a1a}
 
   window.loadKitchen=loadKitchen;
   loadKitchen();
-})();
-</script>
-</body>
-</html>'''
+})();"""
 
-
-
+    return page_shell("LOV3 Kitchen Speed", "/kitchen", body, extra_css, js)
 def _labor_dashboard_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOV3 Labor Analysis</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
-.header{background:linear-gradient(135deg,#1d4ed8,#3b82f6,#60a5fa);padding:24px 32px;color:#fff}
+    from design_system import page_shell
+
+    extra_css = """
+body{background:#111;color:#e5e7eb}
+.nav-bar{background:#1a1a2e;border-bottom:none;padding:0 16px}
+.nav-bar a{color:#94a3b8;padding:12px 16px;font-size:0.82rem;font-weight:500;border-bottom:2px solid transparent;border-radius:0}
+.nav-bar a:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.nav-bar a.active{color:#fff;border-bottom-color:#6366f1;background:rgba(99,102,241,0.1)}
+.header{background:linear-gradient(135deg,#1d4ed8,#3b82f6,#60a5fa);padding:24px 32px;color:#fff;border-radius:0}
 .header h1{font-size:1.5rem;font-weight:800;letter-spacing:-0.5px}.header .subtitle{font-size:0.85rem;opacity:0.9;margin-top:4px}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:24px}
+.container{max-width:1400px}
 .filter-bar{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .filter-bar label{font-size:0.82rem;color:#9ca3af;font-weight:600}
 .filter-bar input[type="date"]{background:#111;border:1px solid #444;color:#e5e7eb;padding:8px 12px;border-radius:8px;font-size:0.85rem}
@@ -2925,16 +2789,14 @@ tr:hover td{background:#1a1a1a}
 .loading-box{background:#1e1e1e;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.3);text-align:center;color:#ccc}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #3b82f6;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
-</style>
-</head>
-<body>
+"""
+
+    body = """
 <div class="header">
   <h1>LOV3 Labor Analysis</h1>
   <div class="subtitle">Weekly labor cost tracking, true labor %, and vendor breakdown</div>
 </div>
-''' + _nav_html("/labor", "dark") + '''
 
-<div class="container">
   <div class="filter-bar">
     <label>From</label><input type="date" id="startDate">
     <label>To</label><input type="date" id="endDate">
@@ -2963,13 +2825,13 @@ tr:hover td{background:#1a1a1a}
       <th>Vendor</th><th class="text-right">Total Paid</th><th class="text-right">Transactions</th>
     </tr></thead><tbody id="vendorTable"></tbody></table></div>
   </div>
-</div>
 
 <div class="loading-overlay" id="loadingOverlay">
   <div class="loading-box"><span class="spinner"></span> Analyzing labor data...</div>
 </div>
+"""
 
-<script>
+    js = """ \
 (function(){
   const $=id=>document.getElementById(id);
   const fmt=v=>'$'+Number(v||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
@@ -3060,26 +2922,58 @@ tr:hover td{background:#1a1a1a}
 
   window.loadLabor=loadLabor;
   loadLabor();
-})();
-</script>
-</body>
-</html>'''
+})();"""
 
-
-
+    return page_shell("LOV3 Labor Analysis", "/labor", body, extra_css, js)
 def _menu_engineering_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOV3 Menu Engineering</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
+    from design_system import page_shell
+
+    body = '''<div class="header">
+  <h1>LOV3 Menu Engineering</h1>
+  <div class="subtitle">Item classification matrix &mdash; Stars, Plowhorses, Puzzles &amp; Dogs</div>
+</div>
+
+  <div class="filter-bar">
+    <label>From</label><input type="date" id="startDate">
+    <label>To</label><input type="date" id="endDate">
+    <button class="btn" onclick="window.loadMenuEng()">Analyze</button>
+  </div>
+
+  <div id="kpiRow" class="kpi-row"></div>
+
+  <div id="matrixGrid" class="matrix-grid"></div>
+
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap">
+    <div id="filterBtns" class="filter-btns" style="margin-bottom:0"></div>
+    <select id="catFilter" onchange="window.filterCategory(this.value)" style="background:#1e1e1e;border:1px solid #444;color:#9ca3af;padding:6px 16px;border-radius:8px;font-size:0.8rem;font-weight:600;cursor:pointer">
+      <option value="all">All Categories</option>
+      <option value="Food">Food</option>
+      <option value="Liquor">Liquor</option>
+      <option value="NA Beverage">NA Beverage</option>
+    </select>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Item Classification</div>
+    <div class="section-body"><table><thead><tr>
+      <th data-col="menu_item">Item</th><th data-col="sales_category">Category</th><th data-col="qty_sold" class="text-right">Qty Sold</th><th data-col="net_revenue" class="text-right">Revenue</th><th data-col="avg_price" class="text-right">Avg Price</th><th data-col="popularity_index" class="text-right">Pop. Idx</th><th data-col="profitability_index" class="text-right">Prof. Idx</th><th data-col="classification">Class</th>
+    </tr></thead><tbody id="itemTable"></tbody></table></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Category Breakdown</div>
+    <div class="section-body"><table><thead><tr>
+      <th>Category</th><th class="text-right">Revenue</th><th class="text-right">Qty</th><th class="text-right">Items</th><th class="text-right">Stars</th><th class="text-right">Plowhorses</th><th class="text-right">Puzzles</th><th class="text-right">Dogs</th>
+    </tr></thead><tbody id="catTable"></tbody></table></div>
+  </div>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-box"><span class="spinner"></span> Analyzing menu items...</div>
+</div>'''
+
+    extra_css = '''
 .header{background:linear-gradient(135deg,#7c3aed,#8b5cf6,#a78bfa);padding:24px 32px;color:#fff}
 .header h1{font-size:1.5rem;font-weight:800;letter-spacing:-0.5px}.header .subtitle{font-size:0.85rem;opacity:0.9;margin-top:4px}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:24px}
 .filter-bar{background:#1e1e1e;border:1px solid #333;border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .filter-bar label{font-size:0.82rem;color:#9ca3af;font-weight:600}
 .filter-bar input[type="date"]{background:#111;border:1px solid #444;color:#e5e7eb;padding:8px 12px;border-radius:8px;font-size:0.85rem}
@@ -3128,56 +3022,9 @@ tr:hover td{background:#1a1a1a}
 .loading-box{background:#1e1e1e;padding:24px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.3);text-align:center;color:#ccc}
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #8b5cf6;border-top-color:transparent;border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes spin{to{transform:rotate(360deg)}}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>LOV3 Menu Engineering</h1>
-  <div class="subtitle">Item classification matrix &mdash; Stars, Plowhorses, Puzzles &amp; Dogs</div>
-</div>
-''' + _nav_html("/menu-eng", "dark") + '''
+'''
 
-<div class="container">
-  <div class="filter-bar">
-    <label>From</label><input type="date" id="startDate">
-    <label>To</label><input type="date" id="endDate">
-    <button class="btn" onclick="window.loadMenuEng()">Analyze</button>
-  </div>
-
-  <div id="kpiRow" class="kpi-row"></div>
-
-  <div id="matrixGrid" class="matrix-grid"></div>
-
-  <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap">
-    <div id="filterBtns" class="filter-btns" style="margin-bottom:0"></div>
-    <select id="catFilter" onchange="window.filterCategory(this.value)" style="background:#1e1e1e;border:1px solid #444;color:#9ca3af;padding:6px 16px;border-radius:8px;font-size:0.8rem;font-weight:600;cursor:pointer">
-      <option value="all">All Categories</option>
-      <option value="Food">Food</option>
-      <option value="Liquor">Liquor</option>
-      <option value="NA Beverage">NA Beverage</option>
-    </select>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Item Classification</div>
-    <div class="section-body"><table><thead><tr>
-      <th data-col="menu_item">Item</th><th data-col="sales_category">Category</th><th data-col="qty_sold" class="text-right">Qty Sold</th><th data-col="net_revenue" class="text-right">Revenue</th><th data-col="avg_price" class="text-right">Avg Price</th><th data-col="popularity_index" class="text-right">Pop. Idx</th><th data-col="profitability_index" class="text-right">Prof. Idx</th><th data-col="classification">Class</th>
-    </tr></thead><tbody id="itemTable"></tbody></table></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Category Breakdown</div>
-    <div class="section-body"><table><thead><tr>
-      <th>Category</th><th class="text-right">Revenue</th><th class="text-right">Qty</th><th class="text-right">Items</th><th class="text-right">Stars</th><th class="text-right">Plowhorses</th><th class="text-right">Puzzles</th><th class="text-right">Dogs</th>
-    </tr></thead><tbody id="catTable"></tbody></table></div>
-  </div>
-</div>
-
-<div class="loading-overlay" id="loadingOverlay">
-  <div class="loading-box"><span class="spinner"></span> Analyzing menu items...</div>
-</div>
-
-<script>
+    js = '''
 (function(){
   const $=id=>document.getElementById(id);
   const fmt=v=>'$'+Number(v||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
@@ -3307,26 +3154,48 @@ tr:hover td{background:#1a1a1a}
   window.loadMenuEng=loadMenuEng;
   loadMenuEng();
 })();
-</script>
-</body>
-</html>'''
+'''
+
+    return page_shell("LOV3 Menu Engineering", "/menu-eng", body, extra_css, js)
 
 
 
 def _kpi_benchmarks_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOV3 KPI Benchmarks</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e5e7eb;min-height:100vh}
+    from design_system import page_shell
+
+    body = '''<div class="header">
+  <h1>LOV3 KPI Benchmarks</h1>
+  <p>Performance scorecard with industry benchmarks &mdash; MTD &amp; YTD</p>
+</div>
+  <div class="toggle-bar">
+    <button class="toggle-btn active" id="btnMTD" onclick="toggleView('mtd')">MTD</button>
+    <button class="toggle-btn" id="btnYTD" onclick="toggleView('ytd')">YTD</button>
+    <button class="toggle-btn" id="btnCustom" onclick="toggleView('custom')">Custom</button>
+    <div class="filter-row" id="dateRow" style="display:none">
+      <label>From</label><input type="date" id="startDate">
+      <label>To</label><input type="date" id="endDate">
+      <button class="analyze-btn" id="analyzeBtn" onclick="loadCustom()">Analyze</button>
+    </div>
+    <span class="period-label" id="periodLabel"></span>
+    <span class="prior-label" id="priorLabel"></span>
+  </div>
+  <div id="staleBanner" class="stale-warning" style="display:none">
+    &#9888; Bank transactions not yet uploaded for this period &mdash; expense-based metrics (COGS, Labor, Prime Cost, Net Margin, Marketing, OPEX, Rev/Labor Hr) are unavailable.
+  </div>
+  <div id="summaryBanner" class="banner" style="display:none"></div>
+  <div id="scorecardSection"></div>
+  <div id="financialSection"></div>
+  <div id="operationalSection"></div>
+  <div id="guestSection"></div>
+  <div id="insightsSection"></div>
+  <div id="trendSection"></div>
+  <div id="legendSection"></div>
+  <div id="loadingMsg" class="loading">Loading KPI data&hellip;</div>'''
+
+    extra_css = '''
 .header{background:linear-gradient(135deg,#6366f1,#818cf8,#a5b4fc);padding:32px 40px;border-bottom:3px solid #4f46e5}
 .header h1{font-size:28px;font-weight:700;color:#fff}
 .header p{color:rgba(255,255,255,.85);margin-top:4px;font-size:14px}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:24px}
 .toggle-bar{display:flex;gap:8px;margin-bottom:20px;align-items:center}
 .toggle-btn{padding:8px 20px;border:1px solid #4f46e5;background:transparent;color:#a5b4fc;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s}
 .toggle-btn.active{background:#6366f1;color:#fff;border-color:#6366f1}
@@ -3385,41 +3254,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .insight-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:5px}
 .insight-label{font-size:13px;font-weight:700;color:#c7d2fe;margin-bottom:4px}
 .insight-text{font-size:13px;color:#d1d5db;line-height:1.5}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>LOV3 KPI Benchmarks</h1>
-  <p>Performance scorecard with industry benchmarks &mdash; MTD &amp; YTD</p>
-</div>
-''' + _nav_html("/kpi-benchmarks", "dark") + '''
-<div class="container">
-  <div class="toggle-bar">
-    <button class="toggle-btn active" id="btnMTD" onclick="toggleView('mtd')">MTD</button>
-    <button class="toggle-btn" id="btnYTD" onclick="toggleView('ytd')">YTD</button>
-    <button class="toggle-btn" id="btnCustom" onclick="toggleView('custom')">Custom</button>
-    <div class="filter-row" id="dateRow" style="display:none">
-      <label>From</label><input type="date" id="startDate">
-      <label>To</label><input type="date" id="endDate">
-      <button class="analyze-btn" id="analyzeBtn" onclick="loadCustom()">Analyze</button>
-    </div>
-    <span class="period-label" id="periodLabel"></span>
-    <span class="prior-label" id="priorLabel"></span>
-  </div>
-  <div id="staleBanner" class="stale-warning" style="display:none">
-    &#9888; Bank transactions not yet uploaded for this period &mdash; expense-based metrics (COGS, Labor, Prime Cost, Net Margin, Marketing, OPEX, Rev/Labor Hr) are unavailable.
-  </div>
-  <div id="summaryBanner" class="banner" style="display:none"></div>
-  <div id="scorecardSection"></div>
-  <div id="financialSection"></div>
-  <div id="operationalSection"></div>
-  <div id="guestSection"></div>
-  <div id="insightsSection"></div>
-  <div id="trendSection"></div>
-  <div id="legendSection"></div>
-  <div id="loadingMsg" class="loading">Loading KPI data&hellip;</div>
-</div>
-<script>
+'''
+
+    js = '''
 (function(){
   const $=id=>document.getElementById(id);
   const fmt=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
@@ -3694,26 +3531,31 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 
   loadBoth();
 })();
-</script>
-</body>
-</html>'''
+'''
+
+    return page_shell("LOV3 KPI Benchmarks", "/kpi-benchmarks", body, extra_css, js)
 
 
 
 def _budget_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOV3 Budget Tracker</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e2e8f0;min-height:100vh}
+    from design_system import page_shell
+
+    body = '''<div class="header">
+  <h1>LOV3 Budget Tracker</h1>
+  <p>Monthly spending performance vs 15% profit margin target</p>
+  <p style="max-width:720px;margin:8px auto 0;font-size:12px;color:rgba(255,255,255,.7);line-height:1.5">Are you spending within your means? This dashboard compares actual monthly expenses to budget targets across COGS, Labor, Marketing, and OPEX. Use it to spot cost overruns before they erode margins, identify which vendors are driving overspend, and prioritize the categories with the biggest savings opportunity on the path to 15% profit.</p>
+</div>
+  <div class="filter-bar">
+    <label>Month:</label>
+    <input type="month" id="monthPicker">
+    <button id="btnAnalyze">Analyze</button>
+  </div>
+  <div id="content"><div class="loading">Loading budget data&hellip;</div></div>'''
+
+    extra_css = '''
 .header{background:linear-gradient(135deg,#059669,#10b981,#34d399);padding:24px 32px;text-align:center}
 .header h1{font-size:24px;font-weight:700;color:#fff}
 .header p{color:rgba(255,255,255,.85);font-size:13px;margin-top:4px}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:20px}
 .filter-bar{display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
 .filter-bar label{color:#94a3b8;font-size:13px}
 .filter-bar input[type="month"]{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px 12px;border-radius:6px;font-size:14px}
@@ -3868,24 +3710,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .rev-grat-block .rg-lov3{color:#34d399;font-weight:600}
 .rev-grat-block .rg-staff{color:#60a5fa;font-weight:600}
 .rev-section-title{font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;font-weight:600}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>LOV3 Budget Tracker</h1>
-  <p>Monthly spending performance vs 15% profit margin target</p>
-  <p style="max-width:720px;margin:8px auto 0;font-size:12px;color:rgba(255,255,255,.7);line-height:1.5">Are you spending within your means? This dashboard compares actual monthly expenses to budget targets across COGS, Labor, Marketing, and OPEX. Use it to spot cost overruns before they erode margins, identify which vendors are driving overspend, and prioritize the categories with the biggest savings opportunity on the path to 15% profit.</p>
-</div>
-''' + _nav_html("/budget", "dark") + '''
-<div class="container">
-  <div class="filter-bar">
-    <label>Month:</label>
-    <input type="month" id="monthPicker">
-    <button id="btnAnalyze">Analyze</button>
-  </div>
-  <div id="content"><div class="loading">Loading budget data&hellip;</div></div>
-</div>
-<script>
+'''
+
+    js = '''
 (function(){
   const $ = id => document.getElementById(id);
   const fmt = n => n == null ? '--' : '$' + Math.abs(n).toLocaleString('en-US', {maximumFractionDigits:0});
@@ -4294,26 +4121,32 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
   $('btnAnalyze').addEventListener('click', loadBudget);
   loadBudget();
 })();
-</script>
-</body>
-</html>'''
+'''
 
+    return page_shell("LOV3 Budget Tracker", "/budget", body, extra_css, js)
 
 
 def _event_roi_html() -> str:
-    return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOV3 Event ROI</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#111;color:#e2e8f0;min-height:100vh}
+    from design_system import page_shell
+
+    body = '''<div class="header">
+  <h1>LOV3 Event ROI</h1>
+  <p>Per-event profitability analysis &mdash; recurring weekly events</p>
+  <p style="max-width:720px;margin:8px auto 0;font-size:12px;color:rgba(255,255,255,.7);line-height:1.5">Which nights are earning their keep? This dashboard measures <strong>contribution margin</strong> &mdash; revenue minus the variable costs each event generates (entertainment, marketing, staffing). Fixed overhead like management salaries, rent, and COGS are excluded because they don&rsquo;t change if you add or cancel a night. Use this to identify underperforming events, evaluate promoter &amp; talent spend, and decide where to invest or cut.</p>
+</div>
+  <div class="filter-bar">
+    <label>From:</label>
+    <input type="date" id="startDate">
+    <label>To:</label>
+    <input type="date" id="endDate">
+    <button id="btnAnalyze">Analyze</button>
+  </div>
+  <div id="content"><div class="loading">Loading event ROI data&hellip;</div></div>'''
+
+    extra_css = '''
 .header{background:linear-gradient(135deg,#92400e,#d97706,#f59e0b);padding:24px 32px;text-align:center}
 .header h1{font-size:24px;font-weight:700;color:#fff}
 .header p{color:rgba(255,255,255,.85);font-size:13px;margin-top:4px}
-''' + _nav_css("dark") + '''
-.container{max-width:1400px;margin:0 auto;padding:20px}
 .filter-bar{display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
 .filter-bar label{color:#94a3b8;font-size:13px}
 .filter-bar input[type="date"]{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px 12px;border-radius:6px;font-size:14px}
@@ -4391,26 +4224,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .method-card .method-source{font-size:11px;color:#94a3b8;margin-bottom:8px;font-style:italic}
 .method-card .method-desc{font-size:12px;color:#cbd5e1;line-height:1.5;margin-bottom:8px}
 .method-card .method-adj{font-size:11px;color:#94a3b8}
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>LOV3 Event ROI</h1>
-  <p>Per-event profitability analysis &mdash; recurring weekly events</p>
-  <p style="max-width:720px;margin:8px auto 0;font-size:12px;color:rgba(255,255,255,.7);line-height:1.5">Which nights are earning their keep? This dashboard measures <strong>contribution margin</strong> &mdash; revenue minus the variable costs each event generates (entertainment, marketing, staffing). Fixed overhead like management salaries, rent, and COGS are excluded because they don&rsquo;t change if you add or cancel a night. Use this to identify underperforming events, evaluate promoter &amp; talent spend, and decide where to invest or cut.</p>
-</div>
-''' + _nav_html("/event-roi", "dark") + '''
-<div class="container">
-  <div class="filter-bar">
-    <label>From:</label>
-    <input type="date" id="startDate">
-    <label>To:</label>
-    <input type="date" id="endDate">
-    <button id="btnAnalyze">Analyze</button>
-  </div>
-  <div id="content"><div class="loading">Loading event ROI data&hellip;</div></div>
-</div>
-<script>
+'''
+
+    js = '''
 (function(){
   const $ = id => document.getElementById(id);
   const fmt = n => n == null ? '--' : '$' + Math.abs(n).toLocaleString('en-US',{maximumFractionDigits:0});
@@ -4633,10 +4449,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
   $('btnAnalyze').addEventListener('click', loadData);
   loadData();
 })();
-</script>
-</body>
-</html>'''
+'''
 
+    return page_shell("LOV3 Event ROI", "/event-roi", body, extra_css, js)
 
 
 def _flash_report_html() -> str:
