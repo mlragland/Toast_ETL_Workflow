@@ -93,11 +93,11 @@ class BofACSVParser:
         df = df.dropna(subset=["date_raw"])
         df = df[df["date_raw"].str.strip() != ""]
 
-        # Parse dates - store as date objects for BigQuery DATE compatibility
+        # Parse dates - store as datetime64 for BigQuery DATE compatibility
         # BofA uses both MM/DD/YYYY and M/D/YY formats across different exports
         df["transaction_date"] = pd.to_datetime(
             df["date_raw"].str.strip(), format="mixed", dayfirst=False
-        ).dt.date
+        ).dt.normalize()  # strips time component, keeps datetime64 dtype
 
         # Parse amounts
         df["amount"] = pd.to_numeric(
@@ -989,7 +989,7 @@ class BigQueryLoader:
         for col in df.columns:
             dtype = str(df[col].dtype)
 
-            if col == 'processing_date':
+            if col in ('processing_date', 'transaction_date'):
                 bq_type = 'DATE'
             elif dtype in ('int64', 'Int64'):
                 bq_type = 'INT64'
