@@ -62,7 +62,68 @@ class FlashReport:
         data["cash"] = self._query_cash(report_date)
         data["margins"] = self._compute_margins(data)
 
+        # Pull pending transactions from Teller (display only, not stored in BQ)
+        data["pending"] = self._fetch_pending_from_teller()
+
         return data
+
+    def _fetch_pending_from_teller(self) -> Dict:
+        """Pull today's pending transactions from Teller for real-time visibility.
+
+        These are NOT loaded to BigQuery — display only in the dashboard.
+        Pending amounts may change or disappear before posting.
+        """
+        try:
+            sm = SecretManager(PROJECT_ID)
+            token = sm.get_secret("teller-api-token")
+            cert_pem = sm.get_secret("teller-certificate")
+            key_pem = sm.get_secret("teller-private-key")
+
+            import tempfile, os
+            cert_f = tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False)
+            cert_f.write(cert_pem); cert_f.close()
+            key_f = tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False)
+            key_f.write(key_pem); key_f.close()
+
+            import requests as req
+            resp = req.get(
+                "https://api.teller.io/accounts/acc_pq7gc19lq41vgjs4ie000/transactions",
+                params={"count": 50},
+                auth=(token, ""),
+                cert=(cert_f.name, key_f.name),
+                timeout=15,
+            )
+            os.unlink(cert_f.name)
+            os.unlink(key_f.name)
+
+            if resp.status_code != 200:
+                return {"transactions": [], "total": 0, "error": None}
+
+            all_txns = resp.json()
+            if isinstance(all_txns, dict) and "error" in all_txns:
+                return {"transactions": [], "total": 0, "error": all_txns["error"]["message"]}
+
+            pending = [t for t in all_txns if t.get("status") == "pending"]
+            total_pending = sum(float(t["amount"]) for t in pending)
+
+            items = [
+                {
+                    "date": t["date"],
+                    "description": t["description"].split("\n")[0].strip(),
+                    "amount": float(t["amount"]),
+                }
+                for t in pending
+            ]
+
+            return {
+                "transactions": items,
+                "count": len(items),
+                "total": round(total_pending, 2),
+            }
+
+        except Exception as e:
+            logger.warning(f"Pending transactions fetch failed: {e}")
+            return {"transactions": [], "count": 0, "total": 0}
 
     def _query_revenue(self, d: str) -> Dict:
         """Revenue, orders, guests, avg check for a single date."""
@@ -252,6 +313,17 @@ class FlashReport:
             f"💵 *Cash:* ${cash['collected']:,.0f} collected | ${cash['deposited']:,.0f} deposited | Gap: ${cash['gap']:,.0f} {gap_icon}"
         )
 
+        # Append pending transactions if any
+        pending = data.get("pending", {})
+        if pending.get("count", 0) > 0:
+            msg += f"\n\n⏳ *Pending Today:* {pending['count']} transactions (${abs(pending['total']):,.0f})"
+            for p in pending["transactions"][:5]:
+                msg += f"\n   • ${abs(p['amount']):,.0f} {p['description'][:40]}"
+            if pending["count"] > 5:
+                msg += f"\n   _...and {pending['count'] - 5} more_"
+
+        return msg
+
     def format_json(self, data: Dict) -> Dict:
         """Format flash report for API JSON response."""
         prior = data["prior_week"]
@@ -278,6 +350,7 @@ class FlashReport:
             "expenses": data["expenses"],
             "margins": data["margins"],
             "cash": data["cash"],
+            "pending": data.get("pending", {"transactions": [], "count": 0, "total": 0}),
         }
 
     # ── Delivery ────────────────────────────────────────────────────────

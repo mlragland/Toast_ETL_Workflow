@@ -4522,7 +4522,25 @@ function render(d){
       <div class="cash-row"><span>Bank Cash Deposited</span><span style="color:#3b82f6;font-weight:600">${fmt(cash.deposited)}</span></div>
       <div class="cash-row"><span>Gap</span><span class="margin-val ${Math.abs(cash.gap)<100?'good':Math.abs(cash.gap)<500?'warn':'bad'}">${fmt(cash.gap)}</span></div>
     </div>
+
+    ${renderPending(d.pending)}
   `;
+}
+
+function renderPending(p){
+  if(!p || !p.count) return '';
+  let rows='';
+  p.transactions.forEach(t=>{
+    const color=t.amount<0?'#e74c3c':'#27ae60';
+    rows+=\`<div class="cash-row"><span>\${t.description.substring(0,45)}</span><span style="color:\${color};font-weight:600">\${fmt(t.amount)}</span></div>\`;
+  });
+  return \`
+    <div class="section" style="border-left:3px solid #f59e0b">
+      <h2>⏳ Pending Today <span style="font-size:0.8rem;font-weight:400;color:#6b7280">(\${p.count} transactions, \${fmt(p.total)} net)</span></h2>
+      <p style="font-size:0.75rem;color:#9ca3af;margin-bottom:12px">Live from Teller API — amounts may change before posting</p>
+      \${rows}
+    </div>
+  \`;
 }
 
 // Auto-load yesterday on page load
