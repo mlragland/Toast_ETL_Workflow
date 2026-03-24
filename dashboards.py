@@ -4641,33 +4641,29 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 
 def _flash_report_html() -> str:
     """Daily Flash Report dashboard — KPIs, server leaderboard, margins, cash gap."""
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOV3 Daily Flash Report</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-""" + _nav_css("dark") + """
-.container{max-width:1200px;margin:0 auto;padding:24px}
-.header{text-align:center;padding:24px 0;background:linear-gradient(135deg,#f59e0b22,#d9770622);border-radius:12px;margin-bottom:24px}
-.header h1{font-size:1.6rem;color:#f59e0b}
-.header p{color:#94a3b8;font-size:0.9rem;margin-top:4px}
+    from design_system import page_shell
+
+    body = """
+<div class="header">
+<h1>🍴 Daily Flash Report</h1>
+<p id="subtitle">Loading...</p>
+<div class="date-picker">
+<input type="date" id="dateInput">
+<button onclick="loadReport()">Load</button>
+<button onclick="sendReport()" style="background:#3b82f6">📤 Send Slack + Email</button>
+</div>
+</div>
+
+<div id="content"><div class="loading">Loading flash report...</div></div>
+"""
+
+    extra_css = """
+.header{background:linear-gradient(135deg,#f59e0b22,#d9770622)}
+.header h1{color:#f59e0b}
 .date-picker{display:flex;justify-content:center;gap:12px;margin:16px 0}
-.date-picker input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px 16px;border-radius:8px;font-size:0.9rem}
 .date-picker button{background:#f59e0b;color:#000;border:none;padding:8px 24px;border-radius:8px;font-weight:600;cursor:pointer}
 .date-picker button:hover{background:#d97706}
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
-.kpi{background:#1e293b;border-radius:12px;padding:20px;text-align:center}
-.kpi .label{font-size:0.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em}
-.kpi .value{font-size:1.8rem;font-weight:700;margin:8px 0}
-.kpi .change{font-size:0.8rem;font-weight:600}
-.kpi .change.up{color:#22c55e}
-.kpi .change.down{color:#ef4444}
-.section{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:16px}
-.section h2{font-size:1rem;color:#f59e0b;margin-bottom:12px}
+.section h2{color:#f59e0b}
 .server-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #334155}
 .server-row:last-child{border:none}
 .server-rank{color:#94a3b8;width:30px}
@@ -4681,27 +4677,9 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFo
 .margin-val.warn{color:#f59e0b}
 .margin-val.bad{color:#ef4444}
 .cash-row{display:flex;justify-content:space-between;padding:10px 0}
-.loading{text-align:center;padding:40px;color:#94a3b8}
-@media(max-width:768px){.kpi-grid{grid-template-columns:1fr 1fr}.container{padding:12px}}
-</style>
-</head>
-<body>
-""" + _nav_html("/flash", "dark") + """
-<div class="container">
-<div class="header">
-<h1>🍴 Daily Flash Report</h1>
-<p id="subtitle">Loading...</p>
-<div class="date-picker">
-<input type="date" id="dateInput">
-<button onclick="loadReport()">Load</button>
-<button onclick="sendReport()" style="background:#3b82f6">📤 Send Slack + Email</button>
-</div>
-</div>
+"""
 
-<div id="content"><div class="loading">Loading flash report...</div></div>
-</div>
-
-<script>
+    js = """
 const API = '/api/flash-report';
 let currentData = null;
 
@@ -4778,55 +4756,16 @@ function render(d){
 
 // Auto-load yesterday on page load
 loadReport();
-</script>
-</body>
-</html>"""
+"""
+
+    return page_shell("LOV3 Daily Flash Report", "/flash", body, extra_css, js)
 
 
 def _vendor_tracker_html() -> str:
     """Vendor Spend Tracker dashboard — top vendors, trends, anomalies."""
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LOV3 Vendor Spend Tracker</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-""" + _nav_css("dark") + """
-.container{max-width:1200px;margin:0 auto;padding:24px}
-.header{text-align:center;padding:24px 0;background:linear-gradient(135deg,#8b5cf622,#6d28d922);border-radius:12px;margin-bottom:24px}
-.header h1{font-size:1.6rem;color:#a78bfa}
-.header p{color:#94a3b8;font-size:0.9rem;margin-top:4px}
-.filter-bar{display:flex;justify-content:center;gap:12px;margin:16px 0;flex-wrap:wrap}
-.filter-bar input,.filter-bar select{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:8px 16px;border-radius:8px;font-size:0.9rem}
-.filter-bar button{background:#8b5cf6;color:#fff;border:none;padding:8px 24px;border-radius:8px;font-weight:600;cursor:pointer}
-.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
-.kpi{background:#1e293b;border-radius:12px;padding:20px;text-align:center}
-.kpi .label{font-size:0.75rem;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em}
-.kpi .value{font-size:1.8rem;font-weight:700;margin:8px 0;color:#a78bfa}
-.section{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:16px}
-.section h2{font-size:1rem;color:#a78bfa;margin-bottom:12px}
-table{width:100%;border-collapse:collapse;font-size:0.85rem}
-th{text-align:left;color:#94a3b8;padding:8px 12px;border-bottom:1px solid #334155;font-weight:500;cursor:pointer}
-th:hover{color:#a78bfa}
-td{padding:8px 12px;border-bottom:1px solid #1e293b}
-tr:hover{background:#1e293b88}
-.spend-bar{height:6px;background:#334155;border-radius:3px;overflow:hidden;margin-top:4px}
-.spend-bar .fill{height:100%;background:linear-gradient(90deg,#8b5cf6,#a78bfa);border-radius:3px}
-.anomaly{background:#7f1d1d22;border:1px solid #991b1b;border-radius:8px;padding:12px;margin-bottom:8px}
-.anomaly.medium{background:#78350f22;border-color:#92400e}
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.7rem;font-weight:600}
-.badge.high{background:#991b1b;color:#fca5a5}
-.badge.medium{background:#92400e;color:#fcd34d}
-.loading{text-align:center;padding:40px;color:#94a3b8}
-@media(max-width:768px){.kpi-grid{grid-template-columns:1fr 1fr}.container{padding:12px}}
-</style>
-</head>
-<body>
-""" + _nav_html("/vendors", "dark") + """
-<div class="container">
+    from design_system import page_shell
+
+    body = """
 <div class="header">
 <h1>🏢 Vendor Spend Tracker</h1>
 <p>Top vendors by spend, month-over-month trends, and cost anomalies</p>
@@ -4838,9 +4777,24 @@ tr:hover{background:#1e293b88}
 </div>
 
 <div id="content"><div class="loading">Loading vendor data...</div></div>
-</div>
+"""
 
-<script>
+    extra_css = """
+.header{background:linear-gradient(135deg,#8b5cf622,#6d28d922)}
+.header h1{color:#a78bfa}
+.section h2{color:#a78bfa}
+.kpi .value{color:#a78bfa}
+.filter-bar button{background:#8b5cf6;color:#fff;border:none;padding:8px 24px;border-radius:8px;font-weight:600;cursor:pointer}
+th:hover{color:#a78bfa}
+.spend-bar{height:6px;background:#334155;border-radius:3px;overflow:hidden;margin-top:4px}
+.spend-bar .fill{height:100%;background:linear-gradient(90deg,#8b5cf6,#a78bfa);border-radius:3px}
+.anomaly{background:#7f1d1d22;border:1px solid #991b1b;border-radius:8px;padding:12px;margin-bottom:8px}
+.anomaly.medium{background:#78350f22;border-color:#92400e}
+.badge.high{background:#991b1b;color:#fca5a5}
+.badge.medium{background:#92400e;color:#fcd34d}
+"""
+
+    js = """
 const API='/api/vendor-tracker';
 document.getElementById('endDate').value=new Date().toISOString().split('T')[0];
 
@@ -4927,6 +4881,6 @@ function render(d){
 }
 
 loadData();
-</script>
-</body>
-</html>"""
+"""
+
+    return page_shell("LOV3 Vendor Spend Tracker", "/vendors", body, extra_css, js)
