@@ -125,7 +125,7 @@ class TellerSync:
                 "transaction_date": t["date"],
                 "description": t["description"].split("\n")[0].strip(),  # first line only
                 "amount": amount,
-                "running_balance": None,
+                "running_balance": float("nan"),  # NaN → NULL in BigQuery FLOAT64
                 "transaction_type": "debit" if amount < 0 else "credit",
                 "abs_amount": abs(amount),
                 "source_file": "teller_sync",
