@@ -93,11 +93,11 @@ class BofACSVParser:
         df = df.dropna(subset=["date_raw"])
         df = df[df["date_raw"].str.strip() != ""]
 
-        # Parse dates - store as YYYY-MM-DD string for BigQuery DATE compatibility
+        # Parse dates - store as date objects for BigQuery DATE compatibility
         # BofA uses both MM/DD/YYYY and M/D/YY formats across different exports
         df["transaction_date"] = pd.to_datetime(
             df["date_raw"].str.strip(), format="mixed", dayfirst=False
-        ).dt.strftime("%Y-%m-%d")
+        ).dt.date
 
         # Parse amounts
         df["amount"] = pd.to_numeric(
