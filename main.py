@@ -121,6 +121,7 @@ def _log_request(response):
         "/bank-review", "/pnl", "/analysis", "/cash-recon", "/menu-mix",
         "/events", "/loyalty", "/servers", "/kitchen", "/labor",
         "/menu-eng", "/kpi-benchmarks", "/budget", "/event-roi",
+        "/promoter-payout",
     ):
         return response
 

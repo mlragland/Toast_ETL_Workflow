@@ -24,6 +24,8 @@ _NAV_LINKS = [
     ("/event-roi", "Event ROI"),
     ("/flash", "Flash"),
     ("/vendors", "Vendors"),
+    ("/abc-invoice", "ABC Invoice"),
+    ("/promoter-payout", "Promoter Payout"),
 ]
 
 
@@ -4673,3 +4675,852 @@ loadData();
 """
 
     return page_shell("LOV3 Vendor Spend Tracker", "/vendors", body, extra_css, js)
+
+
+def _abc_invoice_html() -> str:
+    """Return self-contained HTML for the ABC Staffing invoice generator."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ABC Staffing Invoice</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background:#f5f5f5; color:#1a1a1a; }
+.container { max-width:850px; margin:20px auto; background:#fff; padding:40px; box-shadow:0 2px 8px rgba(0,0,0,0.1); }
+h1 { font-size:1.3rem; text-align:center; margin-bottom:4px; }
+.subtitle { text-align:center; font-size:0.9rem; color:#555; margin-bottom:20px; }
+.controls { display:flex; gap:12px; align-items:center; justify-content:center; margin-bottom:24px; flex-wrap:wrap; }
+.controls label { font-size:0.85rem; font-weight:600; }
+.controls input[type=date] { padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.85rem; }
+.controls button { padding:8px 20px; background:#4f46e5; color:#fff; border:none; border-radius:6px; font-size:0.85rem; font-weight:600; cursor:pointer; }
+.controls button:hover { background:#4338ca; }
+.section-title { font-size:1rem; font-weight:700; text-align:center; margin:20px 0 8px; border-top:2px solid #333; padding-top:12px; }
+table { width:100%; border-collapse:collapse; margin-bottom:16px; font-size:0.85rem; }
+th { background:#e8e8e8; padding:6px 8px; text-align:left; border:1px solid #999; font-weight:700; }
+td { padding:5px 8px; border:1px solid #bbb; }
+td.num { text-align:right; }
+td input, td select { width:100%; border:none; background:transparent; font-size:0.85rem; padding:2px; text-align:inherit; }
+td input.num-input { text-align:right; }
+td input:focus { background:#fffde7; outline:1px solid #4f46e5; }
+tr.total-row { font-weight:700; background:#f0f0f0; }
+tr.grand-total { font-weight:700; background:#333; color:#fff; font-size:1rem; }
+.add-row-btn { display:inline-block; margin:4px 0 12px; padding:4px 14px; font-size:0.8rem; background:#e8e8e8; border:1px solid #aaa; border-radius:4px; cursor:pointer; }
+.add-row-btn:hover { background:#ddd; }
+.del-btn { cursor:pointer; color:#c00; font-weight:700; font-size:0.9rem; border:none; background:none; }
+.loading { text-align:center; padding:40px; color:#888; font-size:1.1rem; }
+@media print {
+  body { background:#fff; }
+  .container { box-shadow:none; padding:20px; margin:0; }
+  .controls, .add-row-btn, .del-btn, .no-print { display:none !important; }
+  td input { border:none; padding:0; }
+  table { font-size:0.8rem; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="controls no-print">
+    <label>Start:</label><input type="date" id="startDate">
+    <label>End:</label><input type="date" id="endDate">
+    <button onclick="loadInvoice()">Generate</button>
+    <button onclick="window.print()" style="background:#059669">Print</button>
+  </div>
+
+  <div id="invoiceContent">
+    <div class="loading">Select dates and click Generate</div>
+  </div>
+</div>
+
+<script>
+// Set default dates to previous Sun-Sat
+const today = new Date();
+const dayOfWeek = today.getDay();
+const lastSat = new Date(today);
+lastSat.setDate(today.getDate() - (dayOfWeek === 0 ? 1 : dayOfWeek + 1) - (dayOfWeek === 6 ? 0 : 0));
+if (dayOfWeek === 0) lastSat.setDate(today.getDate() - 1);
+else if (dayOfWeek === 6) lastSat.setDate(today.getDate());
+else lastSat.setDate(today.getDate() - dayOfWeek - 1);
+const lastSun = new Date(lastSat);
+lastSun.setDate(lastSat.getDate() - 6);
+
+document.getElementById('startDate').value = lastSun.toISOString().slice(0,10);
+document.getElementById('endDate').value = lastSat.toISOString().slice(0,10);
+
+function fmt(n) { return n.toFixed(2); }
+function fmtDollar(n) { return '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+function recalcAll() {
+  // Section 1: Labor
+  let laborTotal = 0;
+  let laborHours = 0;
+  document.querySelectorAll('#laborBody tr:not(.total-row)').forEach(tr => {
+    const hrs = parseFloat(tr.querySelector('.labor-hours')?.value || 0);
+    const rate = parseFloat(tr.querySelector('.labor-rate')?.value || 0);
+    const pay = hrs * rate;
+    const payCell = tr.querySelector('.labor-pay');
+    if (payCell) payCell.value = fmt(pay);
+    laborTotal += pay;
+    laborHours += hrs;
+  });
+  const lt = document.getElementById('laborTotalHours');
+  const lp = document.getElementById('laborTotalPay');
+  if (lt) lt.textContent = fmt(laborHours);
+  if (lp) lp.textContent = fmt(laborTotal);
+
+  // Section 2: Valets
+  let valetTotal = 0;
+  document.querySelectorAll('#valetBody tr:not(.total-row)').forEach(tr => {
+    const rate = parseFloat(tr.querySelector('.valet-rate')?.value || 0);
+    const totalCell = tr.querySelector('.valet-total');
+    if (totalCell) totalCell.value = fmt(rate);
+    valetTotal += rate;
+  });
+  document.getElementById('valetTotalAmt').textContent = fmt(valetTotal);
+
+  // Section 3: Misc
+  let miscTotal = 0;
+  document.querySelectorAll('#miscBody tr:not(.total-row)').forEach(tr => {
+    const hrs = parseFloat(tr.querySelector('.misc-hours')?.value || 0);
+    const rate = parseFloat(tr.querySelector('.misc-rate')?.value || 0);
+    const pay = hrs * rate;
+    const payCell = tr.querySelector('.misc-pay');
+    if (payCell) payCell.value = fmt(pay);
+    miscTotal += pay;
+  });
+  document.getElementById('miscTotalAmt').textContent = fmt(miscTotal);
+
+  // Section 4: Tip-out
+  let tipTotal = 0;
+  document.querySelectorAll('#tipBody tr:not(.total-row)').forEach(tr => {
+    const amt = parseFloat(tr.querySelector('.tip-amt')?.value || 0);
+    tipTotal += amt;
+  });
+  document.getElementById('tipTotalAmt').textContent = fmt(tipTotal);
+
+  // Grand total
+  const grand = laborTotal + valetTotal + miscTotal + tipTotal;
+  document.getElementById('grandTotal').textContent = fmtDollar(grand);
+}
+
+function addMiscRow() {
+  const tbody = document.getElementById('miscBody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" placeholder="Service description"></td>
+    <td><input type="text" class="num-input" placeholder="Date"></td>
+    <td><input type="number" step="0.5" class="num-input misc-hours" value="0" oninput="recalcAll()"></td>
+    <td><input type="number" step="0.01" class="num-input misc-rate" value="15" oninput="recalcAll()"></td>
+    <td class="num"><input type="text" class="num-input misc-pay" value="0.00" readonly></td>
+    <td class="no-print" style="text-align:center"><button class="del-btn" onclick="this.closest('tr').remove();recalcAll()">X</button></td>`;
+  const totalRow = tbody.querySelector('.total-row');
+  tbody.insertBefore(tr, totalRow);
+  recalcAll();
+}
+
+function addValetRow(employee, dateStr, rate) {
+  const tbody = document.getElementById('valetBody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" value="${employee || 'Female Bathroom Valet'}"></td>
+    <td><input type="text" value="${dateStr || ''}"></td>
+    <td class="num"><input type="number" step="1" class="num-input valet-rate" value="${rate || 75}" oninput="recalcAll()"></td>
+    <td class="num"><input type="text" class="num-input valet-total" value="${(rate||75).toFixed(2)}" readonly></td>
+    <td class="no-print" style="text-align:center"><button class="del-btn" onclick="this.closest('tr').remove();recalcAll()">X</button></td>`;
+  const totalRow = tbody.querySelector('.total-row');
+  tbody.insertBefore(tr, totalRow);
+  recalcAll();
+}
+
+function fillAllValets() {
+  const startStr = document.getElementById('startDate').value;
+  const endStr = document.getElementById('endDate').value;
+  if (!startStr || !endStr) return;
+  // Clear existing valet rows (except total)
+  document.querySelectorAll('#valetBody tr:not(.total-row)').forEach(tr => tr.remove());
+  // Day rates: 0=Sun $75, 1=Mon skip, 2=Tue $50, 3=Wed $50, 4=Thu $75, 5=Fri $75, 6=Sat $75
+  const rates = {0:75, 1:null, 2:50, 3:50, 4:75, 5:75, 6:75};
+  const d = new Date(startStr + 'T12:00:00');
+  const end = new Date(endStr + 'T12:00:00');
+  while (d <= end) {
+    const dow = d.getDay();
+    const rate = rates[dow];
+    if (rate !== null) {
+      const dateLabel = (d.getMonth()+1) + '/' + d.getDate();
+      addValetRow('Female Bathroom Valet', dateLabel, rate);
+      addValetRow('Male Bathroom Valet', dateLabel, rate);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  recalcAll();
+}
+
+function addTipRow() {
+  const tbody = document.getElementById('tipBody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" class="num-input" placeholder="Date"></td>
+    <td class="num"><input type="number" step="0.01" class="num-input tip-amt" value="0" oninput="recalcAll()"></td>
+    <td class="no-print" style="text-align:center"><button class="del-btn" onclick="this.closest('tr').remove();recalcAll()">X</button></td>`;
+  const totalRow = tbody.querySelector('.total-row');
+  tbody.insertBefore(tr, totalRow);
+  recalcAll();
+}
+
+function renderInvoice(data) {
+  const p = data.period;
+  let html = `<h1>ABC Staffing Services - Barback/Busser Labor Summary ${p.start}-${p.end}</h1>`;
+
+  // Section 1: Labor
+  html += `<div class="section-title">Barback / Busser Labor Summary</div>
+  <table><thead><tr><th>Employee</th><th>Job Title</th><th style="text-align:right">Regular Hours</th><th style="text-align:right">Hourly Rate</th><th style="text-align:right">Total Pay</th></tr></thead>
+  <tbody id="laborBody">`;
+  data.labor.rows.forEach(r => {
+    html += `<tr>
+      <td><input type="text" value="${r.employee}"></td>
+      <td><input type="text" value="${r.job_title}"></td>
+      <td class="num"><input type="number" step="0.01" class="num-input labor-hours" value="${r.regular_hours}" oninput="recalcAll()"></td>
+      <td class="num"><input type="number" step="0.01" class="num-input labor-rate" value="${r.hourly_rate}" oninput="recalcAll()"></td>
+      <td class="num"><input type="text" class="num-input labor-pay" value="${fmt(r.total_pay)}" readonly></td>
+    </tr>`;
+  });
+  html += `<tr class="total-row"><td colspan="2"><strong>Totals:</strong></td>
+    <td class="num" id="laborTotalHours">${fmt(data.labor.total_hours)}</td>
+    <td></td>
+    <td class="num" id="laborTotalPay">${fmt(data.labor.total_pay)}</td></tr>
+  </tbody></table>`;
+
+  // Section 2: Valets
+  html += `<div class="section-title">Bathroom Valet Labor Summary</div>
+  <table><thead><tr><th>Employee</th><th>Date</th><th style="text-align:right">Flat Rate</th><th style="text-align:right">Total</th><th class="no-print" style="width:30px"></th></tr></thead>
+  <tbody id="valetBody">`;
+  data.valets.rows.forEach(r => {
+    html += `<tr>
+      <td><input type="text" value="${r.employee}"></td>
+      <td><input type="text" value="${r.date}"></td>
+      <td class="num"><input type="number" step="1" class="num-input valet-rate" value="${r.flat_rate}" oninput="recalcAll()"></td>
+      <td class="num"><input type="text" class="num-input valet-total" value="${fmt(r.total)}" readonly></td>
+      <td class="no-print" style="text-align:center"><button class="del-btn" onclick="this.closest('tr').remove();recalcAll()">X</button></td>
+    </tr>`;
+  });
+  html += `<tr class="total-row"><td colspan="3"><strong>Total:</strong></td>
+    <td class="num" id="valetTotalAmt">${fmt(data.valets.total)}</td><td class="no-print"></td></tr>
+  </tbody></table>
+  <span class="add-row-btn no-print" onclick="addValetRow()">+ Add Valet</span>
+  <span class="add-row-btn no-print" onclick="fillAllValets()" style="margin-left:8px;background:#d1fae5;border-color:#6ee7b7">Fill All Days (M+F)</span>`;
+
+  // Section 3: Misc Services
+  html += `<div class="section-title">Miscellaneous Services</div>
+  <table><thead><tr><th>Service</th><th>Date</th><th style="text-align:right">Hours</th><th style="text-align:right">Rate</th><th style="text-align:right">Total</th><th class="no-print" style="width:30px"></th></tr></thead>
+  <tbody id="miscBody">
+  <tr class="total-row"><td colspan="4"><strong>Total:</strong></td><td class="num" id="miscTotalAmt">0.00</td><td class="no-print"></td></tr>
+  </tbody></table>
+  <span class="add-row-btn no-print" onclick="addMiscRow()">+ Add Service</span>`;
+
+  // Section 4: Tip-out
+  html += `<div class="section-title">Server Grat Pool Tip-Out</div>
+  <table><thead><tr><th>Date:</th><th style="text-align:right">Amount:</th><th class="no-print" style="width:30px"></th></tr></thead>
+  <tbody id="tipBody">
+  <tr class="total-row"><td><strong>Total:</strong></td><td class="num" id="tipTotalAmt">0.00</td><td class="no-print"></td></tr>
+  </tbody></table>
+  <span class="add-row-btn no-print" onclick="addTipRow()">+ Add Tip-Out</span>`;
+
+  // Grand Total
+  html += `<table style="margin-top:20px"><tbody>
+  <tr class="grand-total"><td><strong>Grand Total:</strong></td><td class="num" id="grandTotal" style="text-align:right">${fmtDollar(data.labor.total_pay + data.valets.total)}</td></tr>
+  </tbody></table>`;
+
+  document.getElementById('invoiceContent').innerHTML = html;
+  recalcAll();
+}
+
+async function loadInvoice() {
+  const start = document.getElementById('startDate').value.replace(/-/g,'');
+  const end = document.getElementById('endDate').value.replace(/-/g,'');
+  if (!start || !end) { alert('Please select both dates'); return; }
+
+  document.getElementById('invoiceContent').innerHTML = '<div class="loading">Loading from Toast Labor API...</div>';
+
+  try {
+    const resp = await fetch('/api/abc-invoice', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({start_date: start, end_date: end})
+    });
+    if (!resp.ok) throw new Error('API error: ' + resp.status);
+    const data = await resp.json();
+    renderInvoice(data);
+  } catch(e) {
+    document.getElementById('invoiceContent').innerHTML = '<div class="loading" style="color:#c00">Error: ' + e.message + '</div>';
+  }
+}
+
+// Auto-load on page open
+window.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('start')) document.getElementById('startDate').value = params.get('start');
+  if (params.get('end')) document.getElementById('endDate').value = params.get('end');
+  loadInvoice();
+});
+</script>
+</body>
+</html>"""
+
+
+def _promoter_payout_html() -> str:
+    """Promoter payout calculator — replaces the manual Excel template.
+
+    Auto-pulls Toast sales for a date + time window, lets the user enter
+    expenses and promoter %, computes the payout using the same formulas as
+    the original spreadsheet, persists the result to BigQuery, and renders a
+    print-friendly summary that matches the spreadsheet layout.
+    """
+    from design_system import page_shell
+
+    body = r"""<div class="header">
+  <h1>LOV3 Promoter Payout</h1>
+  <p>Auto-pulls Toast sales for the event window, applies the same formulas as the spreadsheet template, and saves the payout for history &amp; reprint.</p>
+</div>
+
+<div class="section" id="historySection">
+  <div class="history-toggle" onclick="toggleHistory()">
+    <h3>Payout History <span class="hint">(click to expand)</span></h3>
+    <span id="historyArrow">&#9656;</span>
+  </div>
+  <div id="historyBody" style="display:none">
+    <div class="history-filter">
+      <label>Promoter:</label>
+      <input type="text" id="histPromoter" placeholder="filter by name (optional)">
+      <label>From:</label>
+      <input type="date" id="histFrom">
+      <label>To:</label>
+      <input type="date" id="histTo">
+      <button class="btn-ghost-sm" onclick="loadHistory()">Refresh</button>
+    </div>
+    <div id="historyTable"><div class="muted">Loading&hellip;</div></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>1. Event Setup</h3>
+  <div class="grid-4">
+    <div class="fld"><label>Event Date</label><input type="date" id="eventDate"></div>
+    <div class="fld"><label>Day</label><input type="text" id="eventDay" readonly placeholder="auto"></div>
+    <div class="fld"><label>Time Start</label><input type="time" id="timeStart" value="22:00"></div>
+    <div class="fld"><label>Time End</label><input type="time" id="timeEnd" value="02:00"></div>
+    <div class="fld"><label>Promoter Name</label><input type="text" id="promoterName" placeholder="required"></div>
+    <div class="fld"><label>Promoter Contact</label><input type="text" id="promoterContact" placeholder="phone or email"></div>
+    <div class="fld"><label>Prepared By</label><input type="text" id="preparedBy" placeholder="e.g. Sossity Taylor"></div>
+    <div class="fld" style="display:flex;align-items:flex-end">
+      <button class="btn-primary" onclick="fetchSales()" id="fetchBtn">Pull Sales from Toast</button>
+    </div>
+  </div>
+  <div id="fetchMsg" class="fetch-msg"></div>
+</div>
+
+<div class="section">
+  <h3>2. Shift Report</h3>
+  <div class="grid-3">
+    <div class="fld"><label>Net Liquor Sales</label><input type="number" step="0.01" id="netLiquor" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>Net Food Sales</label><input type="number" step="0.01" id="netFood" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>Net Shisha Sales</label><input type="number" step="0.01" id="netShisha" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>CC Tips <span class="hint">(info only)</span></label><input type="number" step="0.01" id="ccTips" value="0"></div>
+    <div class="fld"><label>CC Auto-Grat <span class="hint">(info only)</span></label><input type="number" step="0.01" id="ccGrat" value="0"></div>
+    <div class="fld"><label>Projected Sales</label><input type="number" step="0.01" id="projSales" value="0"></div>
+    <div class="fld"><label>Guest Count</label><input type="number" step="1" id="guestCount" value=""></div>
+    <div class="fld"><label>Cover Revenue</label><input type="number" step="0.01" id="coverRev" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>&nbsp;</label><span class="hint" style="padding-top:10px;display:block">(cover not in payout base by default; edit JS to include)</span></div>
+    <div class="fld"><label>Liquor COGS %</label><input type="number" step="0.01" id="liquorCogs" value="18" oninput="recompute()"></div>
+    <div class="fld"><label>Food COGS %</label><input type="number" step="0.01" id="foodCogs" value="25" oninput="recompute()"></div>
+    <div class="fld"><label>Mixed Bev Tax %</label><input type="number" step="0.01" id="mbtPct" value="6.7" oninput="recompute()"></div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>3. Payments Breakdown</h3>
+  <div class="grid-3">
+    <div class="fld"><label>Security Expense</label><input type="number" step="0.01" id="expSecurity" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>Hostess Payout</label><input type="number" step="0.01" id="expHostess" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>Entertainment / DJ / Band</label><input type="number" step="0.01" id="expEnt" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>Pro-Rated Marketing</label><input type="number" step="0.01" id="expMkt" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>Other</label><input type="number" step="0.01" id="expOther" value="0" oninput="recompute()"></div>
+    <div class="fld"><label>Promoter Payout %</label><input type="number" step="0.01" id="promoterPct" value="15" oninput="recompute()"></div>
+  </div>
+  <div class="fld" style="margin-top:12px">
+    <label>Notes (optional)</label>
+    <textarea id="notes" rows="2" placeholder="e.g. Security includes $400 HPD, 2 officers @ $50/hr"></textarea>
+  </div>
+
+  <div class="readout">
+    <div class="readout-row"><span>Gross Sales (Liquor + Food + Shisha)</span><span id="rdGross">$0</span></div>
+    <div class="readout-row"><span>COGS Adjustment (Liquor &times; 18% + Food &times; 25%)</span><span id="rdCogs">$0</span></div>
+    <div class="readout-row"><span>Mixed Beverage Tax (Liquor &times; 6.7%)</span><span id="rdMbt">$0</span></div>
+    <div class="readout-row strong"><span>Net Sales</span><span id="rdNetSales">$0</span></div>
+    <div class="readout-row"><span>Total Expenses</span><span id="rdTotalExp">$0</span></div>
+    <div class="readout-row strong"><span>Net Profit</span><span id="rdNetProfit">$0</span></div>
+    <div class="readout-row payout-row"><span>Promoter Payout (<span id="rdPct">15</span>%)</span><span id="rdPayout">$0</span></div>
+  </div>
+</div>
+
+<div class="action-bar">
+  <button class="btn-primary" onclick="savePayout()" id="saveBtn">Save Payout</button>
+  <button class="btn-ghost" onclick="window.print()">Print</button>
+  <button class="btn-ghost" onclick="clearForm()">Clear Form</button>
+  <span id="saveMsg" class="save-msg"></span>
+</div>
+
+<!-- Print-only summary panel; hidden on screen, shown on print -->
+<div class="print-summary" id="printSummary">
+  <h2>LOV3 HOUSTON &mdash; Promoter Payout</h2>
+  <div class="ps-meta">
+    <div><strong>Date:</strong> <span id="psDate"></span></div>
+    <div><strong>Day:</strong> <span id="psDay"></span></div>
+    <div><strong>Time Frame:</strong> <span id="psTime"></span></div>
+    <div><strong>Promoter:</strong> <span id="psPromoter"></span></div>
+    <div><strong>Prepared by:</strong> <span id="psPrep"></span></div>
+  </div>
+  <table class="ps-table">
+    <tr><th colspan="2">Shift Report</th></tr>
+    <tr><td>Net Liquor Sales</td><td id="psLiquor"></td></tr>
+    <tr><td>Net Food Sales</td><td id="psFood"></td></tr>
+    <tr><td>Net Shisha Sales</td><td id="psShisha"></td></tr>
+    <tr><td>Gross Sales</td><td id="psGross"></td></tr>
+    <tr><td>COGS Adjustment</td><td id="psCogs"></td></tr>
+    <tr><td>Mixed Beverage Tax</td><td id="psMbt"></td></tr>
+    <tr class="ps-strong"><td>Net Sales</td><td id="psNetSales"></td></tr>
+    <tr><th colspan="2">Event Expenses</th></tr>
+    <tr><td>Security</td><td id="psSec"></td></tr>
+    <tr><td>Hostess</td><td id="psHost"></td></tr>
+    <tr><td>Entertainment</td><td id="psEnt"></td></tr>
+    <tr><td>Pro-Rated Marketing</td><td id="psMkt"></td></tr>
+    <tr><td>Other</td><td id="psOther"></td></tr>
+    <tr class="ps-strong"><td>Total Expenses</td><td id="psTotalExp"></td></tr>
+    <tr class="ps-strong"><td>Net Profit</td><td id="psNetProfit"></td></tr>
+    <tr class="ps-payout"><td>Promoter Payout (<span id="psPct"></span>%)</td><td id="psPayout"></td></tr>
+  </table>
+  <div class="ps-notes" id="psNotes"></div>
+</div>
+"""
+
+    extra_css = r"""
+.header{background:linear-gradient(135deg,#4c1d95,#7c3aed,#a855f7);padding:24px 32px;text-align:center;border-radius:16px;margin-bottom:24px;color:#fff}
+.header h1{font-size:24px;font-weight:700;color:#fff}
+.header p{color:rgba(255,255,255,.85);font-size:13px;margin-top:6px;max-width:760px;margin-left:auto;margin-right:auto;line-height:1.5}
+.section{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid #334155;color:#e2e8f0}
+.section h3{font-size:15px;font-weight:600;color:#e2e8f0;margin-bottom:14px;letter-spacing:0.02em}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr)}.grid-3{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.grid-4{grid-template-columns:1fr}.grid-3{grid-template-columns:1fr}}
+.fld{display:flex;flex-direction:column;gap:4px}
+.fld label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.04em;font-weight:600}
+.fld input, .fld textarea, .fld select{background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 12px;border-radius:6px;font-size:14px;font-family:inherit}
+.fld input:focus, .fld textarea:focus{outline:none;border-color:#a855f7;box-shadow:0 0 0 2px rgba(168,85,247,0.25)}
+.hint{color:#64748b;font-size:11px;font-weight:400;text-transform:none}
+.btn-primary{background:#7c3aed;color:#fff;border:none;padding:9px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer}
+.btn-primary:hover{background:#6d28d9}
+.btn-primary:disabled{background:#475569;cursor:not-allowed}
+.btn-ghost{background:transparent;color:#cbd5e1;border:1px solid #475569;padding:9px 20px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer}
+.btn-ghost:hover{border-color:#a855f7;color:#a855f7}
+.btn-ghost-sm{background:transparent;color:#cbd5e1;border:1px solid #475569;padding:5px 12px;border-radius:5px;font-size:12px;cursor:pointer}
+.fetch-msg{margin-top:10px;font-size:13px;color:#94a3b8;min-height:18px}
+.fetch-msg.ok{color:#34d399}
+.fetch-msg.err{color:#f87171}
+.readout{margin-top:18px;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:14px 18px}
+.readout-row{display:flex;justify-content:space-between;padding:6px 0;font-size:14px;color:#cbd5e1;border-bottom:1px solid #1e293b}
+.readout-row:last-child{border-bottom:none}
+.readout-row.strong{font-weight:700;color:#e2e8f0;font-size:15px}
+.readout-row.payout-row{margin-top:6px;padding-top:12px;border-top:2px solid #7c3aed;font-size:20px;font-weight:800;color:#a855f7}
+.action-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 32px}
+.save-msg{margin-left:12px;font-size:13px}
+.save-msg.ok{color:#34d399}
+.save-msg.err{color:#f87171}
+.history-toggle{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none}
+.history-toggle h3{margin-bottom:0}
+.history-filter{display:flex;gap:10px;align-items:center;margin:12px 0;flex-wrap:wrap}
+.history-filter label{font-size:12px;color:#94a3b8}
+.history-filter input{background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:6px 10px;border-radius:5px;font-size:13px}
+.muted{color:#64748b;font-size:13px}
+.hist-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+.hist-table th{text-align:left;padding:8px 10px;border-bottom:1px solid #334155;color:#94a3b8;font-size:11px;text-transform:uppercase}
+.hist-table th.right, .hist-table td.right{text-align:right;font-variant-numeric:tabular-nums}
+.hist-table td{padding:7px 10px;border-bottom:1px solid #1e293b;color:#e2e8f0}
+.hist-table tr.hist-row:hover td{background:#334155;cursor:pointer}
+
+/* Print-only block — hidden on screen */
+.print-summary{display:none}
+
+@media print{
+  body{background:#fff !important;color:#000 !important}
+  .nav-bar, .header, .section, .action-bar, #historySection{display:none !important}
+  .print-summary{display:block !important;color:#000;font-family:Arial,sans-serif;padding:20px}
+  .print-summary h2{text-align:center;font-size:22px;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:12px}
+  .ps-meta{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 24px;margin-bottom:16px;font-size:13px}
+  .ps-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  .ps-table th{background:#222;color:#fff;text-align:left;padding:8px 10px;font-size:12px;text-transform:uppercase}
+  .ps-table td{padding:6px 10px;border-bottom:1px solid #ddd}
+  .ps-table td:last-child{text-align:right;font-variant-numeric:tabular-nums;width:30%}
+  .ps-strong td{font-weight:700;background:#f3f4f6}
+  .ps-payout td{background:#000;color:#fff;font-weight:800;font-size:15px}
+  .ps-notes{margin-top:14px;font-size:12px;color:#444;white-space:pre-wrap}
+  .container{max-width:none;padding:0}
+}
+"""
+
+    extra_js = r"""
+const $ = id => document.getElementById(id);
+const fmt = n => '$' + Number(n || 0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+function num(id){
+  const v = parseFloat($(id).value);
+  return isNaN(v) ? 0 : v;
+}
+
+function updateEventDay(){
+  const d = $('eventDate').value;
+  if(!d){ $('eventDay').value=''; return; }
+  const dt = new Date(d + 'T12:00:00');
+  $('eventDay').value = DOW[dt.getDay()];
+}
+
+function recompute(){
+  const liquor = num('netLiquor');
+  const food = num('netFood');
+  const shisha = num('netShisha');
+  const liquorCogs = num('liquorCogs') / 100;
+  const foodCogs = num('foodCogs') / 100;
+  const mbt = num('mbtPct') / 100;
+  const sec = num('expSecurity');
+  const host = num('expHostess');
+  const ent = num('expEnt');
+  const mkt = num('expMkt');
+  const other = num('expOther');
+  const pct = num('promoterPct') / 100;
+
+  const gross = liquor + food + shisha;
+  const cogs = liquor * liquorCogs + food * foodCogs;
+  const mbtTax = liquor * mbt;
+  const netSales = gross - cogs - mbtTax;
+  const totalExp = sec + host + ent + mkt + other;
+  const netProfit = netSales - totalExp;
+  const payout = netProfit * pct;
+
+  $('rdGross').textContent = fmt(gross);
+  $('rdCogs').textContent = '-' + fmt(cogs);
+  $('rdMbt').textContent = '-' + fmt(mbtTax);
+  $('rdNetSales').textContent = fmt(netSales);
+  $('rdTotalExp').textContent = '-' + fmt(totalExp);
+  $('rdNetProfit').textContent = fmt(netProfit);
+  $('rdPayout').textContent = fmt(payout);
+  $('rdPct').textContent = num('promoterPct');
+
+  $('psDate').textContent = $('eventDate').value || '--';
+  $('psDay').textContent = $('eventDay').value || '--';
+  $('psTime').textContent = ($('timeStart').value || '--') + ' - ' + ($('timeEnd').value || '--');
+  $('psPromoter').textContent = ($('promoterName').value || '--') + ($('promoterContact').value ? ' (' + $('promoterContact').value + ')' : '');
+  $('psPrep').textContent = $('preparedBy').value || '--';
+  $('psLiquor').textContent = fmt(liquor);
+  $('psFood').textContent = fmt(food);
+  $('psShisha').textContent = fmt(shisha);
+  $('psGross').textContent = fmt(gross);
+  $('psCogs').textContent = '-' + fmt(cogs);
+  $('psMbt').textContent = '-' + fmt(mbtTax);
+  $('psNetSales').textContent = fmt(netSales);
+  $('psSec').textContent = fmt(sec);
+  $('psHost').textContent = fmt(host);
+  $('psEnt').textContent = fmt(ent);
+  $('psMkt').textContent = fmt(mkt);
+  $('psOther').textContent = fmt(other);
+  $('psTotalExp').textContent = fmt(totalExp);
+  $('psNetProfit').textContent = fmt(netProfit);
+  $('psPct').textContent = num('promoterPct');
+  $('psPayout').textContent = fmt(payout);
+  $('psNotes').textContent = $('notes').value || '';
+}
+
+function fetchSales(){
+  const ed = $('eventDate').value;
+  const ts = $('timeStart').value;
+  const te = $('timeEnd').value;
+  if(!ed || !ts || !te){
+    $('fetchMsg').className = 'fetch-msg err';
+    $('fetchMsg').textContent = 'Pick event date and time start/end first.';
+    return;
+  }
+  $('fetchBtn').disabled = true;
+  $('fetchMsg').className = 'fetch-msg';
+  $('fetchMsg').textContent = 'Fetching from Toast...';
+  fetch('/api/promoter-payout/fetch-sales', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({event_date: ed, time_start: ts, time_end: te})
+  })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+      $('fetchBtn').disabled = false;
+      if(!ok){
+        $('fetchMsg').className = 'fetch-msg err';
+        $('fetchMsg').textContent = 'Error: ' + (body.error || 'unknown');
+        return;
+      }
+      $('netLiquor').value = (body.net_liquor || 0).toFixed(2);
+      $('netFood').value = (body.net_food || 0).toFixed(2);
+      $('netShisha').value = (body.net_shisha || 0).toFixed(2);
+      $('ccTips').value = (body.cc_tips || 0).toFixed(2);
+      $('ccGrat').value = (body.cc_auto_grat || 0).toFixed(2);
+      const otherKeys = Object.keys(body.other || {});
+      const otherMsg = otherKeys.length ? ' Unbucketed: ' + otherKeys.map(k => k + '=' + fmt(body.other[k])).join(', ') : '';
+      $('fetchMsg').className = 'fetch-msg ok';
+      $('fetchMsg').textContent = 'Pulled ' + body.time_start + ' to ' + body.time_end + '.' + otherMsg;
+      recompute();
+    })
+    .catch(e => {
+      $('fetchBtn').disabled = false;
+      $('fetchMsg').className = 'fetch-msg err';
+      $('fetchMsg').textContent = 'Network error: ' + e.message;
+    });
+}
+
+let currentPayoutId = null;
+let historyRows = [];
+
+function savePayout(){
+  const ed = $('eventDate').value;
+  const promoter = $('promoterName').value.trim();
+  if(!ed || !promoter){
+    $('saveMsg').className = 'save-msg err';
+    $('saveMsg').textContent = 'Event date and promoter name are required.';
+    return;
+  }
+  $('saveBtn').disabled = true;
+  $('saveMsg').className = 'save-msg';
+  $('saveMsg').textContent = 'Saving...';
+  const payload = {
+    payout_id: currentPayoutId,
+    event_date: ed,
+    event_day: $('eventDay').value,
+    time_start: $('timeStart').value,
+    time_end: $('timeEnd').value,
+    promoter_name: promoter,
+    promoter_contact: $('promoterContact').value,
+    prepared_by: $('preparedBy').value,
+    projected_sales: num('projSales'),
+    guest_count: $('guestCount').value ? parseInt($('guestCount').value, 10) : null,
+    cover_revenue: num('coverRev'),
+    net_liquor: num('netLiquor'),
+    net_food: num('netFood'),
+    net_shisha: num('netShisha'),
+    cc_tips: num('ccTips'),
+    cc_auto_grat: num('ccGrat'),
+    liquor_cogs_pct: num('liquorCogs') / 100,
+    food_cogs_pct: num('foodCogs') / 100,
+    mixed_bev_tax_pct: num('mbtPct') / 100,
+    exp_security: num('expSecurity'),
+    exp_hostess: num('expHostess'),
+    exp_entertainment: num('expEnt'),
+    exp_marketing: num('expMkt'),
+    exp_other: num('expOther'),
+    promoter_pct: num('promoterPct') / 100,
+    notes: $('notes').value,
+    status: 'final'
+  };
+  fetch('/api/promoter-payout/save', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+      $('saveBtn').disabled = false;
+      if(!ok){
+        $('saveMsg').className = 'save-msg err';
+        $('saveMsg').textContent = 'Error: ' + (body.error || 'unknown');
+        return;
+      }
+      currentPayoutId = body.payout_id;
+      $('saveMsg').className = 'save-msg ok';
+      $('saveMsg').textContent = 'Saved. Payout = ' + fmt(body.computed_promoter_payout) + ' (id ' + body.payout_id.slice(0,8) + ')';
+      loadHistory();
+    })
+    .catch(e => {
+      $('saveBtn').disabled = false;
+      $('saveMsg').className = 'save-msg err';
+      $('saveMsg').textContent = 'Network error: ' + e.message;
+    });
+}
+
+function clearForm(){
+  currentPayoutId = null;
+  ['eventDate','eventDay','promoterName','promoterContact','preparedBy','guestCount','notes'].forEach(id => $(id).value='');
+  ['netLiquor','netFood','netShisha','ccTips','ccGrat','projSales','coverRev','expSecurity','expHostess','expEnt','expMkt','expOther'].forEach(id => $(id).value='0');
+  $('liquorCogs').value='18';
+  $('foodCogs').value='25';
+  $('mbtPct').value='6.7';
+  $('promoterPct').value='15';
+  $('timeStart').value='22:00';
+  $('timeEnd').value='02:00';
+  $('saveMsg').textContent='';
+  $('fetchMsg').textContent='';
+  recompute();
+}
+
+function toggleHistory(){
+  const body = $('historyBody');
+  const arr = $('historyArrow');
+  if(body.style.display === 'none'){
+    body.style.display = 'block';
+    arr.innerHTML = '&#9662;';
+    if(!body.dataset.loaded){
+      loadHistory();
+      body.dataset.loaded = '1';
+    }
+  } else {
+    body.style.display = 'none';
+    arr.innerHTML = '&#9656;';
+  }
+}
+
+function renderHistoryTable(rows){
+  const wrap = $('historyTable');
+  while(wrap.firstChild) wrap.removeChild(wrap.firstChild);
+  if(!rows.length){
+    const d = document.createElement('div');
+    d.className = 'muted';
+    d.textContent = 'No payouts yet.';
+    wrap.appendChild(d);
+    return;
+  }
+  const table = document.createElement('table');
+  table.className = 'hist-table';
+  const thead = document.createElement('thead');
+  const trh = document.createElement('tr');
+  ['Date','Promoter','Day','Net Profit','Payout','Status'].forEach((h, i) => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    if(i === 3 || i === 4) th.className = 'right';
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.forEach((r, idx) => {
+    const tr = document.createElement('tr');
+    tr.className = 'hist-row';
+    tr.dataset.idx = String(idx);
+    tr.addEventListener('click', () => loadPayout(historyRows[Number(tr.dataset.idx)]));
+    const cells = [
+      r.event_date || '',
+      r.promoter_name || '',
+      r.event_day || '',
+      fmt(r.computed_net_profit),
+      fmt(r.computed_promoter_payout),
+      r.status || ''
+    ];
+    cells.forEach((v, i) => {
+      const td = document.createElement('td');
+      td.textContent = v;
+      if(i === 3 || i === 4) td.className = 'right';
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+}
+
+function loadHistory(){
+  const payload = {limit: 50};
+  if($('histPromoter').value.trim()) payload.promoter_name = $('histPromoter').value.trim();
+  if($('histFrom').value) payload.start_date = $('histFrom').value;
+  if($('histTo').value) payload.end_date = $('histTo').value;
+  const wrap = $('historyTable');
+  while(wrap.firstChild) wrap.removeChild(wrap.firstChild);
+  const loading = document.createElement('div');
+  loading.className = 'muted';
+  loading.textContent = 'Loading...';
+  wrap.appendChild(loading);
+  fetch('/api/promoter-payout/history', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+      if(!ok){
+        wrap.removeChild(wrap.firstChild);
+        const d = document.createElement('div');
+        d.className = 'muted';
+        d.textContent = 'Error: ' + (body.error || 'unknown');
+        wrap.appendChild(d);
+        return;
+      }
+      historyRows = body.payouts || [];
+      renderHistoryTable(historyRows);
+    })
+    .catch(e => {
+      wrap.removeChild(wrap.firstChild);
+      const d = document.createElement('div');
+      d.className = 'muted';
+      d.textContent = 'Network error: ' + e.message;
+      wrap.appendChild(d);
+    });
+}
+
+function loadPayout(r){
+  if(!r) return;
+  currentPayoutId = r.payout_id;
+  $('eventDate').value = r.event_date || '';
+  updateEventDay();
+  $('timeStart').value = (r.time_start || '').slice(11, 16) || '22:00';
+  $('timeEnd').value = (r.time_end || '').slice(11, 16) || '02:00';
+  $('promoterName').value = r.promoter_name || '';
+  $('promoterContact').value = r.promoter_contact || '';
+  $('preparedBy').value = r.prepared_by || '';
+  $('projSales').value = r.projected_sales || 0;
+  $('guestCount').value = r.guest_count == null ? '' : r.guest_count;
+  $('coverRev').value = r.cover_revenue || 0;
+  $('netLiquor').value = r.net_liquor || 0;
+  $('netFood').value = r.net_food || 0;
+  $('netShisha').value = r.net_shisha || 0;
+  $('ccTips').value = r.cc_tips || 0;
+  $('ccGrat').value = r.cc_auto_grat || 0;
+  $('liquorCogs').value = ((r.liquor_cogs_pct || 0.18) * 100).toFixed(2);
+  $('foodCogs').value = ((r.food_cogs_pct || 0.25) * 100).toFixed(2);
+  $('mbtPct').value = '6.7';
+  $('expSecurity').value = r.exp_security || 0;
+  $('expHostess').value = r.exp_hostess || 0;
+  $('expEnt').value = r.exp_entertainment || 0;
+  $('expMkt').value = r.exp_marketing || 0;
+  $('expOther').value = r.exp_other || 0;
+  $('promoterPct').value = ((r.promoter_pct || 0.15) * 100).toFixed(2);
+  $('notes').value = r.notes || '';
+  $('saveMsg').className = 'save-msg ok';
+  $('saveMsg').textContent = 'Loaded ' + (r.payout_id || '').slice(0,8) + ' - edit and Save Payout to update.';
+  recompute();
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+document.addEventListener('DOMContentLoaded', function(){
+  $('eventDate').addEventListener('change', function(){ updateEventDay(); recompute(); });
+  $('timeStart').addEventListener('change', recompute);
+  $('timeEnd').addEventListener('change', recompute);
+  ['promoterName','promoterContact','preparedBy','notes'].forEach(id => {
+    $(id).addEventListener('input', recompute);
+  });
+  const t = new Date();
+  $('eventDate').value = t.toISOString().slice(0,10);
+  updateEventDay();
+  recompute();
+});
+"""
+
+    return page_shell(
+        title="LOV3 Promoter Payout",
+        active_path="/promoter-payout",
+        body_html=body,
+        extra_css=extra_css,
+        extra_js=extra_js,
+    )

@@ -745,3 +745,10 @@ FIXED_LABOR_MONTHLY = round((MGMT_SALARY_PER_PERIOD + CONTRACTOR_1099_PER_PERIOD
 OPERATIONAL_LABOR_CATEGORIES = [
     "security services", "contract labor",
 ]
+
+# Promoter Payout calculator — defaults from "Other Promoter Days.xlsx" template
+DEFAULT_LIQUOR_COGS_PCT = 0.18
+DEFAULT_FOOD_COGS_PCT = 0.25
+DEFAULT_MIXED_BEV_TAX_PCT = 0.067   # Texas mixed beverage gross receipts tax
+DEFAULT_PROMOTER_PCT = 0.15
+PROMOTER_PAYOUT_TABLE = "PromoterPayouts_raw"

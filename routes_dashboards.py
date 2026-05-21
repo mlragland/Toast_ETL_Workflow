@@ -8,6 +8,7 @@ from dashboards import (
     _customer_loyalty_html, _server_performance_html, _kitchen_speed_html,
     _labor_dashboard_html, _menu_engineering_html, _kpi_benchmarks_html,
     _budget_html, _event_roi_html, _flash_report_html, _vendor_tracker_html,
+    _abc_invoice_html, _promoter_payout_html,
 )
 
 bp = Blueprint("dashboards", __name__)
@@ -100,3 +101,15 @@ def flash_report_page():
 def vendor_tracker_page():
     """Vendor Spend Tracker dashboard."""
     return Response(_vendor_tracker_html(), mimetype="text/html")
+
+
+@bp.route("/abc-invoice", methods=["GET"])
+def abc_invoice_page():
+    """ABC Staffing invoice generator — auto-populates from Toast Labor API."""
+    return Response(_abc_invoice_html(), mimetype="text/html")
+
+
+@bp.route("/promoter-payout", methods=["GET"])
+def promoter_payout_page():
+    """Promoter payout calculator — replaces 'Other Promoter Days.xlsx' template."""
+    return Response(_promoter_payout_html(), mimetype="text/html")

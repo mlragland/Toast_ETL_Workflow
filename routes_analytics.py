@@ -25,6 +25,9 @@ from config import (
     LABOR_DOW_PCT, FIXED_LABOR_MONTHLY,
     BUDGET_TARGETS, BUDGET_SUBCATEGORIES, UNBUDGETED_SECTIONS,
     CHECK_REGISTER_SHEET_ID,
+    DEFAULT_LIQUOR_COGS_PCT, DEFAULT_FOOD_COGS_PCT,
+    DEFAULT_MIXED_BEV_TAX_PCT, DEFAULT_PROMOTER_PCT,
+    PROMOTER_PAYOUT_TABLE,
 )
 from services import BofACSVParser, BankCategoryManager, CheckRegisterSync
 from weekly_report import WeeklyReportGenerator
@@ -4624,4 +4627,377 @@ def api_teller_sync():
 
     except Exception as e:
         logger.error(f"Teller sync error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+
+# ── ABC Staffing Invoice API ─────────────────────────────────────────────────
+
+@bp.route("/api/abc-invoice", methods=["POST"])
+def api_abc_invoice():
+    """Generate ABC Staffing invoice data from Toast Labor API.
+
+    Request body:
+    {"start_date": "20260406", "end_date": "20260412"}
+    """
+    from abc_invoice import generate_invoice_data
+
+    data = request.get_json() or {}
+    start = data.get("start_date", "")
+    end = data.get("end_date", "")
+    if not start or not end:
+        return jsonify({"error": "start_date and end_date required"}), 400
+
+    try:
+        result = generate_invoice_data(start, end)
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"ABC invoice error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ─── Promoter Payout calculator ──────────────────────────────────────────────
+
+import uuid as _uuid
+from datetime import datetime as _dt, date as _date, time as _time_t
+
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+_LIQUOR_HINTS = ("liquor", "beer", "wine", "bottle", "cocktail", "spirits", "na beverage", "n/a beverage")
+_FOOD_HINTS = ("food", "kitchen", "appetizer", "entree", "dessert", "brunch")
+_SHISHA_HINTS = ("hookah", "shisha")
+
+
+def _parse_event_window(event_date: str, time_start: str, time_end: str):
+    """Resolve event_date + HH:MM start/end into two CST datetimes.
+
+    If end <= start, end rolls into the next day (handles e.g. "22:00" - "02:00").
+    Returns (start_dt, end_dt) as naive datetimes — Toast paid_date/sent_date are
+    stored in restaurant local time, so naive comparisons work directly.
+    """
+    if not _DATE_RE.match(event_date):
+        raise ValueError(f"Invalid event_date: {event_date}. Use YYYY-MM-DD.")
+    if not _TIME_RE.match(time_start) or not _TIME_RE.match(time_end):
+        raise ValueError("Invalid time_start/time_end. Use HH:MM (24-hour).")
+
+    ed = _date.fromisoformat(event_date)
+    sh, sm = (int(x) for x in time_start.split(":"))
+    eh, em = (int(x) for x in time_end.split(":"))
+    start_dt = _dt.combine(ed, _time_t(sh, sm))
+    end_dt = _dt.combine(ed, _time_t(eh, em))
+    if end_dt <= start_dt:
+        end_dt = end_dt + timedelta(days=1)
+    return start_dt, end_dt
+
+
+def _bucket_sales_category(cat: str) -> str:
+    """Map a Toast sales_category string to one of: liquor / food / shisha / other."""
+    c = (cat or "").lower()
+    for h in _LIQUOR_HINTS:
+        if h in c:
+            return "liquor"
+    for h in _FOOD_HINTS:
+        if h in c:
+            return "food"
+    for h in _SHISHA_HINTS:
+        if h in c:
+            return "shisha"
+    return c or "uncategorized"
+
+
+@bp.route("/api/promoter-payout/fetch-sales", methods=["POST"])
+def api_promoter_payout_fetch_sales():
+    """Pull Toast sales for a date + time window for the promoter payout calculator.
+
+    Request body: {"event_date": "YYYY-MM-DD", "time_start": "HH:MM", "time_end": "HH:MM"}
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        start_dt, end_dt = _parse_event_window(
+            data.get("event_date", ""),
+            data.get("time_start", ""),
+            data.get("time_end", ""),
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    try:
+        bq = bigquery.Client(project=PROJECT_ID)
+
+        # Filter by ORDER_DATE (when the order was opened), not sent_date or
+        # paid_date — this matches Toast's Sales Summary UI ("Custom hours" filter).
+        # order_date is STRING in two formats depending on ingestion era:
+        #   - "YYYY-MM-DD HH:MM:SS" (current ETL)
+        #   - "M/D/YY h:MM AM/PM"   (2024 backfill)
+        cat_sql = f"""
+        WITH parsed AS (
+            SELECT
+                COALESCE(
+                    SAFE.PARSE_DATETIME('%Y-%m-%d %H:%M:%S', order_date),
+                    SAFE.PARSE_DATETIME('%m/%d/%y %I:%M %p', order_date)
+                ) AS order_dt,
+                sales_category,
+                net_price,
+                voided
+            FROM `{PROJECT_ID}.{DATASET_ID}.ItemSelectionDetails_raw`
+            WHERE processing_date BETWEEN @proc_start AND @proc_end
+        )
+        SELECT
+            LOWER(IFNULL(sales_category, '')) AS category,
+            COALESCE(SUM(SAFE_CAST(net_price AS FLOAT64)), 0) AS net_amount
+        FROM parsed
+        WHERE order_dt BETWEEN @start_dt AND @end_dt
+          AND (voided IS NULL OR LOWER(voided) != 'true')
+        GROUP BY category
+        """
+
+        pay_sql = f"""
+        WITH parsed AS (
+            SELECT
+                COALESCE(
+                    SAFE.PARSE_DATETIME('%Y-%m-%d %H:%M:%S', order_date),
+                    SAFE.PARSE_DATETIME('%m/%d/%y %I:%M %p', order_date)
+                ) AS order_dt,
+                tip, gratuity, status
+            FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
+            WHERE processing_date BETWEEN @proc_start AND @proc_end
+        )
+        SELECT
+            COALESCE(SUM(SAFE_CAST(tip AS FLOAT64)), 0)      AS cc_tips,
+            COALESCE(SUM(SAFE_CAST(gratuity AS FLOAT64)), 0) AS cc_auto_grat
+        FROM parsed
+        WHERE order_dt BETWEEN @start_dt AND @end_dt
+            AND status IN ('CAPTURED', 'AUTHORIZED', 'CAPTURE_IN_PROGRESS')
+        """
+
+        # Bracket processing_date to (start_date, end_date.date()) — handles rollover
+        params = [
+            bigquery.ScalarQueryParameter("start_dt", "DATETIME", start_dt),
+            bigquery.ScalarQueryParameter("end_dt", "DATETIME", end_dt),
+            bigquery.ScalarQueryParameter("proc_start", "DATE", start_dt.date().isoformat()),
+            bigquery.ScalarQueryParameter("proc_end", "DATE", end_dt.date().isoformat()),
+        ]
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+
+        cat_rows = list(bq.query(cat_sql, job_config=job_config).result())
+        pay_row = next(iter(bq.query(pay_sql, job_config=job_config).result()), None)
+
+        buckets = {"liquor": 0.0, "food": 0.0, "shisha": 0.0}
+        other: Dict[str, float] = {}
+        for r in cat_rows:
+            amt = float(r.net_amount or 0)
+            if amt == 0:
+                continue
+            b = _bucket_sales_category(r.category)
+            if b in buckets:
+                buckets[b] += amt
+            else:
+                other[b] = other.get(b, 0.0) + amt
+
+        return jsonify({
+            "time_start": start_dt.isoformat(),
+            "time_end": end_dt.isoformat(),
+            "net_liquor": round(buckets["liquor"], 2),
+            "net_food": round(buckets["food"], 2),
+            "net_shisha": round(buckets["shisha"], 2),
+            "cc_tips": round(float(pay_row.cc_tips) if pay_row else 0.0, 2),
+            "cc_auto_grat": round(float(pay_row.cc_auto_grat) if pay_row else 0.0, 2),
+            "other": {k: round(v, 2) for k, v in other.items()},
+        })
+    except Exception as e:
+        logger.error(f"fetch-sales error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+def _compute_payout_totals(p: dict) -> dict:
+    """Apply the spreadsheet formulas server-side. Mirrors recompute() in the UI."""
+    liquor = float(p.get("net_liquor") or 0)
+    food = float(p.get("net_food") or 0)
+    shisha = float(p.get("net_shisha") or 0)
+    liquor_cogs = float(p.get("liquor_cogs_pct") or DEFAULT_LIQUOR_COGS_PCT)
+    food_cogs = float(p.get("food_cogs_pct") or DEFAULT_FOOD_COGS_PCT)
+    mbt_pct = float(p.get("mixed_bev_tax_pct") or DEFAULT_MIXED_BEV_TAX_PCT)
+    sec = float(p.get("exp_security") or 0)
+    host = float(p.get("exp_hostess") or 0)
+    ent = float(p.get("exp_entertainment") or 0)
+    mkt = float(p.get("exp_marketing") or 0)
+    other = float(p.get("exp_other") or 0)
+    pct = float(p.get("promoter_pct") or DEFAULT_PROMOTER_PCT)
+
+    gross = liquor + food + shisha
+    cogs = liquor * liquor_cogs + food * food_cogs
+    mbt = liquor * mbt_pct
+    net_sales = gross - cogs - mbt
+    total_exp = sec + host + ent + mkt + other
+    net_profit = net_sales - total_exp
+    payout = net_profit * pct
+
+    return {
+        "computed_gross_sales": round(gross, 2),
+        "computed_cogs_adjustment": round(cogs, 2),
+        "computed_mixed_bev_tax": round(mbt, 2),
+        "computed_net_sales": round(net_sales, 2),
+        "computed_total_expenses": round(total_exp, 2),
+        "computed_net_profit": round(net_profit, 2),
+        "computed_promoter_payout": round(payout, 2),
+    }
+
+
+@bp.route("/api/promoter-payout/save", methods=["POST"])
+def api_promoter_payout_save():
+    """Insert or update a promoter payout row in BigQuery.
+
+    Recomputes all totals server-side; never trusts client math.
+    Pass payout_id to update an existing row; omit to insert a new one.
+    """
+    data = request.get_json(silent=True) or {}
+
+    event_date = data.get("event_date", "")
+    if not _DATE_RE.match(event_date):
+        return jsonify({"error": "event_date required (YYYY-MM-DD)"}), 400
+
+    promoter_name = (data.get("promoter_name") or "").strip()
+    if not promoter_name:
+        return jsonify({"error": "promoter_name required"}), 400
+
+    time_start_str = data.get("time_start", "00:00")
+    time_end_str = data.get("time_end", "00:00")
+    try:
+        start_dt, end_dt = _parse_event_window(event_date, time_start_str, time_end_str)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    totals = _compute_payout_totals(data)
+
+    payout_id = (data.get("payout_id") or "").strip() or _uuid.uuid4().hex
+    status_val = data.get("status") or "draft"
+    if status_val not in ("draft", "final", "paid"):
+        return jsonify({"error": "status must be 'draft', 'final', or 'paid'"}), 400
+
+    guest_count_raw = data.get("guest_count")
+    guest_count_val = None
+    if guest_count_raw not in (None, ""):
+        try:
+            guest_count_val = int(guest_count_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "guest_count must be an integer"}), 400
+
+    row = {
+        "payout_id": payout_id,
+        "created_at": _dt.utcnow().isoformat(),
+        "updated_at": _dt.utcnow().isoformat(),
+        "event_date": event_date,
+        "event_day": data.get("event_day") or "",
+        "time_window_label": f"{time_start_str}-{time_end_str}",
+        "time_start": start_dt.isoformat(),
+        "time_end": end_dt.isoformat(),
+        "promoter_name": promoter_name,
+        "promoter_contact": data.get("promoter_contact") or None,
+        "prepared_by": data.get("prepared_by") or None,
+        "projected_sales": float(data.get("projected_sales") or 0),
+        "guest_count": guest_count_val,
+        "cover_revenue": float(data.get("cover_revenue") or 0),
+        "net_liquor": float(data.get("net_liquor") or 0),
+        "net_food": float(data.get("net_food") or 0),
+        "net_shisha": float(data.get("net_shisha") or 0),
+        "cc_tips": float(data.get("cc_tips") or 0),
+        "cc_auto_grat": float(data.get("cc_auto_grat") or 0),
+        "liquor_cogs_pct": float(data.get("liquor_cogs_pct") or DEFAULT_LIQUOR_COGS_PCT),
+        "food_cogs_pct": float(data.get("food_cogs_pct") or DEFAULT_FOOD_COGS_PCT),
+        "mixed_bev_tax_pct": float(data.get("mixed_bev_tax_pct") or DEFAULT_MIXED_BEV_TAX_PCT),
+        "exp_security": float(data.get("exp_security") or 0),
+        "exp_hostess": float(data.get("exp_hostess") or 0),
+        "exp_entertainment": float(data.get("exp_entertainment") or 0),
+        "exp_marketing": float(data.get("exp_marketing") or 0),
+        "exp_other": float(data.get("exp_other") or 0),
+        "promoter_pct": float(data.get("promoter_pct") or DEFAULT_PROMOTER_PCT),
+        "notes": data.get("notes") or None,
+        "status": status_val,
+        **totals,
+    }
+
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{PROMOTER_PAYOUT_TABLE}"
+
+    try:
+        bq = bigquery.Client(project=PROJECT_ID)
+
+        # Delete existing row if updating (MERGE is heavier; row count is tiny)
+        if data.get("payout_id"):
+            del_sql = f"DELETE FROM `{table_ref}` WHERE payout_id = @pid"
+            del_job = bq.query(
+                del_sql,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=[bigquery.ScalarQueryParameter("pid", "STRING", payout_id)]
+                ),
+            )
+            del_job.result()
+
+        errors = bq.insert_rows_json(table_ref, [row])
+        if errors:
+            logger.error(f"PromoterPayouts_raw insert errors: {errors}")
+            return jsonify({"error": f"BigQuery insert failed: {errors}"}), 500
+
+        return jsonify(row)
+    except Exception as e:
+        logger.error(f"promoter-payout save error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/promoter-payout/history", methods=["POST"])
+def api_promoter_payout_history():
+    """List saved promoter payouts. All filters optional."""
+    data = request.get_json(silent=True) or {}
+
+    where = []
+    params: List[bigquery.ScalarQueryParameter] = []
+
+    if data.get("start_date"):
+        if not _DATE_RE.match(data["start_date"]):
+            return jsonify({"error": "Invalid start_date"}), 400
+        where.append("event_date >= @start_date")
+        params.append(bigquery.ScalarQueryParameter("start_date", "DATE", data["start_date"]))
+
+    if data.get("end_date"):
+        if not _DATE_RE.match(data["end_date"]):
+            return jsonify({"error": "Invalid end_date"}), 400
+        where.append("event_date <= @end_date")
+        params.append(bigquery.ScalarQueryParameter("end_date", "DATE", data["end_date"]))
+
+    promoter = (data.get("promoter_name") or "").strip()
+    if promoter:
+        where.append("LOWER(promoter_name) LIKE LOWER(@promoter)")
+        params.append(bigquery.ScalarQueryParameter("promoter", "STRING", f"%{promoter}%"))
+
+    try:
+        limit = max(1, min(int(data.get("limit") or 50), 500))
+    except (TypeError, ValueError):
+        limit = 50
+    params.append(bigquery.ScalarQueryParameter("row_limit", "INT64", limit))
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f"""
+    SELECT *
+    FROM `{PROJECT_ID}.{DATASET_ID}.{PROMOTER_PAYOUT_TABLE}`
+    {where_sql}
+    ORDER BY event_date DESC, created_at DESC
+    LIMIT @row_limit
+    """
+
+    try:
+        bq = bigquery.Client(project=PROJECT_ID)
+        job_config = bigquery.QueryJobConfig(query_parameters=params)
+        rows = list(bq.query(sql, job_config=job_config).result())
+        payouts = []
+        for r in rows:
+            d = dict(r.items())
+            # Coerce non-JSON-serializable types
+            for k, v in list(d.items()):
+                if hasattr(v, "isoformat"):
+                    d[k] = v.isoformat()
+            payouts.append(d)
+        return jsonify({"payouts": payouts})
+    except NotFound:
+        return jsonify({"payouts": [], "warning": f"Table {PROMOTER_PAYOUT_TABLE} not found — create it first."}), 200
+    except Exception as e:
+        logger.error(f"promoter-payout history error: {e}")
         return jsonify({"error": str(e)}), 500
