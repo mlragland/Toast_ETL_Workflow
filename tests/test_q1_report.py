@@ -261,3 +261,16 @@ def _build_minimal_report_data() -> Q1ReportData:
         revenue=rev, costs=costs, profitability=profit,
         kpis=kpis, staff=staff, cashflow=cashflow, forward=forward,
     )
+
+
+def test_render_html_returns_complete_page():
+    gen = Q1ReportGenerator(MagicMock())
+    data = _build_minimal_report_data()
+    out = gen.render_html(data)
+    assert out.startswith("<!DOCTYPE html>")
+    assert "<title>" in out
+    assert "Q1 2026 Financial Analysis" in out
+    assert "A. Revenue Analysis" in out
+    assert "G. Forward Look" in out
+    # Make sure it doesn't include the literal '{{' template artifact
+    assert "{{" not in out
