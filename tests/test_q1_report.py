@@ -152,3 +152,38 @@ def test_fetch_cashflow_flags_concentration_warning():
     assert section.total_expenses == 85_000.0
     # VendorBig is 20000 / 85000 = 23.5% — exceeds 15% threshold
     assert any("VendorBig" in w for w in section.concentration_warnings)
+
+
+def test_fetch_assembles_all_sections():
+    gen = Q1ReportGenerator(MagicMock())
+    fake_revenue = RevenueSection(
+        q1_2026=PeriodMetrics(label="Q1 2026", gross_revenue=200_000.0),
+        q4_2025=PeriodMetrics(label="Q4 2025", gross_revenue=180_000.0),
+        q1_2025=PeriodMetrics(label="Q1 2025", gross_revenue=160_000.0),
+    )
+    fake_costs = CostSection(
+        q1_2026=PeriodMetrics(label="Q1 2026", cogs=40_000, labor=60_000, opex=40_000),
+        q4_2025=PeriodMetrics(label="Q4 2025"),
+        q1_2025=PeriodMetrics(label="Q1 2025"),
+    )
+    fake_kpis = KPISection(
+        q1_2026=PeriodMetrics(label="Q1 2026"),
+        q4_2025=PeriodMetrics(label="Q4 2025"),
+        q1_2025=PeriodMetrics(label="Q1 2025"),
+    )
+    fake_staff = StaffSection()
+    fake_cashflow = CashFlowSection()
+    with patch.object(Q1ReportGenerator, "_fetch_revenue", return_value=fake_revenue), \
+         patch.object(Q1ReportGenerator, "_fetch_costs", return_value=fake_costs), \
+         patch.object(Q1ReportGenerator, "_fetch_kpis", return_value=fake_kpis), \
+         patch.object(Q1ReportGenerator, "_fetch_staff", return_value=fake_staff), \
+         patch.object(Q1ReportGenerator, "_fetch_cashflow", return_value=fake_cashflow):
+        data = gen.fetch()
+    assert data.revenue.q1_2026.gross_revenue == 200_000.0
+    assert data.costs.q1_2026.labor == 60_000
+    assert len(data.forward.bullets) == 5
+    assert data.generated_at  # non-empty string
+
+
+# Import dataclasses used in this test
+from q1_report import RevenueSection, CostSection, KPISection, StaffSection, CashFlowSection

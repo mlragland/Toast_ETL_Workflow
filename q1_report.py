@@ -164,8 +164,29 @@ class Q1ReportGenerator:
         self.client = client
 
     def fetch(self) -> Q1ReportData:
-        """Run all section queries and assemble Q1ReportData. Filled in Task 8."""
-        raise NotImplementedError("Implemented in Task 8")
+        log.info("Q1 report: fetching revenue section")
+        revenue = self._fetch_revenue()
+        log.info("Q1 report: fetching cost section")
+        costs = self._fetch_costs(revenue)
+        profitability = self._build_profitability(revenue, costs)
+        log.info("Q1 report: fetching KPI section")
+        kpis = self._fetch_kpis(revenue)
+        log.info("Q1 report: fetching staff section")
+        staff = self._fetch_staff()
+        log.info("Q1 report: fetching cashflow section")
+        cashflow = self._fetch_cashflow()
+        forward = ForwardLookSection(bullets=list(Q1_REPORT_FORWARD_LOOK))
+
+        return Q1ReportData(
+            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S CST"),
+            revenue=revenue,
+            costs=costs,
+            profitability=profitability,
+            kpis=kpis,
+            staff=staff,
+            cashflow=cashflow,
+            forward=forward,
+        )
 
     def render_html(self, data: Q1ReportData) -> str:
         """Render full HTML page. Filled in Task 10."""
