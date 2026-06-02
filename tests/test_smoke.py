@@ -84,10 +84,10 @@ def _stub_q1_data():
 def test_q1_report_html_returns_200_with_title(client):
     with patch("routes_dashboards.Q1ReportGenerator") as Gen:
         Gen.return_value.fetch.return_value = _stub_q1_data()
-        Gen.return_value.render_html.return_value = "<!DOCTYPE html><title>Q1 2026 Financial Analysis</title>"
+        Gen.return_value.render_html.return_value = "<!DOCTYPE html><title>LOV3 / Houston — Q1 2026 Financial Review</title>"
         resp = client.get("/q1-report")
     assert resp.status_code == 200
-    assert b"Q1 2026 Financial Analysis" in resp.data
+    assert b"Q1 2026 Financial Review" in resp.data
 
 
 def test_q1_report_markdown_returns_200_with_header(client):

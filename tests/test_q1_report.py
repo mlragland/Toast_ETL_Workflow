@@ -269,8 +269,9 @@ def test_render_html_returns_complete_page():
     out = gen.render_html(data)
     assert out.startswith("<!DOCTYPE html>")
     assert "<title>" in out
-    assert "Q1 2026 Financial Analysis" in out
-    assert "A. Revenue Analysis" in out
-    assert "G. Forward Look" in out
-    # Make sure it doesn't include the literal '{{' template artifact
-    assert "{{" not in out
+    assert "Q1 · 2026" in out
+    assert "A — Revenue" in out
+    assert "G — Forward Look" in out
+    # No unrendered Python format placeholders
+    assert "{rev." not in out
+    assert "{costs." not in out
