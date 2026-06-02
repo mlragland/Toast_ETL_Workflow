@@ -412,3 +412,172 @@ class Q1ReportGenerator:
             revenue_per_business_day_q1=safe_div(gross_q1, q1["business_days"]),
             revenue_per_labor_hour_q1=safe_div(gross_q1, q1["labor_hours"]),
         )
+
+    def _query_bartender_revenue(self, start: str, end: str) -> List[dict]:
+        """Bartender attribution via KitchenTimings fulfilled_by — NOT POS sales alone."""
+        from config import BUSINESS_DAY_SQL
+        sql = f"""
+        SELECT
+          fulfilled_by AS name,
+          COUNT(DISTINCT check_guid) AS items,
+          SUM(net_price) AS revenue
+        FROM `toast-analytics-444116.toast_raw.KitchenTimings_raw`
+        WHERE DATE({BUSINESS_DAY_SQL.format(dt_col='sent_date')}) BETWEEN @start AND @end
+          AND fulfilled_by IS NOT NULL
+        GROUP BY fulfilled_by
+        ORDER BY revenue DESC
+        LIMIT 10
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start", "DATE",
+                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
+            bigquery.ScalarQueryParameter("end", "DATE",
+                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+        ])
+        try:
+            return [{"name": r["name"], "revenue": float(r["revenue"] or 0), "hours": 0.0}
+                    for r in self.client.query(sql, job_config=job_config).result()]
+        except Exception as e:
+            log.warning("Bartender query failed: %s", e)
+            return []
+
+    def _query_server_revenue(self, start: str, end: str) -> List[dict]:
+        """Server attribution including Bottle Manager tab name parsing.
+
+        Bottle Manager is a POS station, not a person. When a check is rung
+        under 'Bottle Manager' but the tab name contains a server name pattern
+        (e.g., 'BM-Maria' or 'Maria-BM'), credit the revenue back to that server.
+        """
+        from config import BUSINESS_DAY_SQL
+        sql = f"""
+        WITH base AS (
+          SELECT
+            CASE
+              WHEN LOWER(server_name) LIKE '%bottle manager%'
+                THEN REGEXP_EXTRACT(tab_name, r'(?i)([A-Za-z]+)')
+              ELSE server_name
+            END AS attributed_name,
+            total_amount
+          FROM `toast-analytics-444116.toast_raw.CheckDetails_raw`
+          WHERE DATE({BUSINESS_DAY_SQL.format(dt_col='opened_date')}) BETWEEN @start AND @end
+        )
+        SELECT attributed_name AS name, SUM(total_amount) AS revenue
+        FROM base
+        WHERE attributed_name IS NOT NULL
+        GROUP BY attributed_name
+        ORDER BY revenue DESC
+        LIMIT 10
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start", "DATE",
+                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
+            bigquery.ScalarQueryParameter("end", "DATE",
+                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+        ])
+        try:
+            return [{"name": r["name"], "revenue": float(r["revenue"] or 0), "hours": 0.0}
+                    for r in self.client.query(sql, job_config=job_config).result()]
+        except Exception as e:
+            log.warning("Server query failed: %s", e)
+            return []
+
+    def _fetch_staff(self) -> StaffSection:
+        bartenders = self._query_bartender_revenue(Q1_2026_START, Q1_2026_END)
+        servers = self._query_server_revenue(Q1_2026_START, Q1_2026_END)
+        bartenders_sorted = sorted(bartenders, key=lambda x: x["revenue"], reverse=True)[:5]
+        servers_sorted = sorted(servers, key=lambda x: x["revenue"], reverse=True)[:5]
+        return StaffSection(
+            top_bartenders=[StaffPerformer(b["name"], b["revenue"], b["hours"]) for b in bartenders_sorted],
+            top_servers=[StaffPerformer(s["name"], s["revenue"], s["hours"]) for s in servers_sorted],
+        )
+
+    def _query_total_deposits(self, start: str, end: str) -> float:
+        sql = """
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM `toast-analytics-444116.toast_raw.BankTransactions_raw`
+        WHERE transaction_date BETWEEN @start AND @end
+          AND amount > 0
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start", "DATE",
+                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
+            bigquery.ScalarQueryParameter("end", "DATE",
+                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+        ])
+        try:
+            row = next(self.client.query(sql, job_config=job_config).result(), None)
+            return float(row["total"] or 0) if row else 0.0
+        except Exception as e:
+            log.warning("Deposits query failed: %s", e)
+            return 0.0
+
+    def _query_expenses_for_cashflow(self, start: str, end: str) -> Dict[str, float]:
+        sql = """
+        SELECT
+          COALESCE(category, 'Uncategorized') AS category,
+          SUM(ABS(amount)) AS spend
+        FROM `toast-analytics-444116.toast_raw.BankTransactions_raw`
+        WHERE transaction_date BETWEEN @start AND @end
+          AND amount < 0
+        GROUP BY category
+        ORDER BY spend DESC
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start", "DATE",
+                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
+            bigquery.ScalarQueryParameter("end", "DATE",
+                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+        ])
+        try:
+            return {r["category"]: float(r["spend"] or 0)
+                    for r in self.client.query(sql, job_config=job_config).result()}
+        except Exception as e:
+            log.warning("Expenses query failed: %s", e)
+            return {}
+
+    def _query_top_vendors(self, start: str, end: str) -> List[dict]:
+        sql = """
+        SELECT
+          COALESCE(vendor_name, description) AS vendor,
+          SUM(ABS(amount)) AS spend
+        FROM `toast-analytics-444116.toast_raw.BankTransactions_raw`
+        WHERE transaction_date BETWEEN @start AND @end
+          AND amount < 0
+        GROUP BY vendor
+        ORDER BY spend DESC
+        LIMIT 10
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start", "DATE",
+                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
+            bigquery.ScalarQueryParameter("end", "DATE",
+                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+        ])
+        try:
+            return [{"vendor": r["vendor"] or "Unknown", "spend": float(r["spend"] or 0)}
+                    for r in self.client.query(sql, job_config=job_config).result()]
+        except Exception as e:
+            log.warning("Top vendors query failed: %s", e)
+            return []
+
+    def _fetch_cashflow(self) -> CashFlowSection:
+        deposits = self._query_total_deposits(Q1_2026_START, Q1_2026_END)
+        by_cat = self._query_expenses_for_cashflow(Q1_2026_START, Q1_2026_END)
+        vendors = self._query_top_vendors(Q1_2026_START, Q1_2026_END)
+        total_exp = sum(by_cat.values())
+
+        vendor_objs = []
+        warnings = []
+        for v in vendors:
+            pct = safe_div(v["spend"], total_exp)
+            vendor_objs.append(VendorSpend(name=v["vendor"], spend=v["spend"], pct_of_opex=pct))
+            if pct > VENDOR_CONCENTRATION_THRESHOLD:
+                warnings.append(f"{v['vendor']} represents {pct*100:.1f}% of opex (threshold: {VENDOR_CONCENTRATION_THRESHOLD*100:.0f}%)")
+
+        return CashFlowSection(
+            total_deposits=deposits,
+            total_expenses=total_exp,
+            by_category=by_cat,
+            top_vendors=vendor_objs,
+            concentration_warnings=warnings,
+        )

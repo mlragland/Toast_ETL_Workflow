@@ -117,3 +117,38 @@ def test_fetch_kpis_computes_revenue_per_business_day():
     assert section.q1_2026.covers == 1000
     assert section.revenue_per_business_day_q1 == pytest.approx(5000.0)  # 260000/52
     assert section.revenue_per_labor_hour_q1 == pytest.approx(130.0)  # 260000/2000
+
+
+def test_fetch_staff_returns_top_performers_sorted():
+    gen = Q1ReportGenerator(MagicMock())
+    fake_bartenders = [
+        {"name": "Alice", "revenue": 50_000.0, "hours": 200.0},
+        {"name": "Bob", "revenue": 70_000.0, "hours": 250.0},
+    ]
+    fake_servers = [
+        {"name": "Carol", "revenue": 60_000.0, "hours": 180.0},
+    ]
+    with patch.object(Q1ReportGenerator, "_query_bartender_revenue", return_value=fake_bartenders), \
+         patch.object(Q1ReportGenerator, "_query_server_revenue", return_value=fake_servers):
+        section = gen._fetch_staff()
+    assert section.top_bartenders[0].name == "Bob"  # sorted desc
+    assert section.top_bartenders[0].attributed_revenue == 70_000.0
+    assert section.top_servers[0].name == "Carol"
+
+
+def test_fetch_cashflow_flags_concentration_warning():
+    gen = Q1ReportGenerator(MagicMock())
+    fake_deposits = 300_000.0
+    fake_expenses_by_cat = {"Rent": 50_000.0, "Food": 30_000.0, "Marketing": 5_000.0}
+    fake_vendors = [
+        {"vendor": "VendorBig", "spend": 20_000.0},
+        {"vendor": "VendorSmall", "spend": 1_000.0},
+    ]
+    with patch.object(Q1ReportGenerator, "_query_total_deposits", return_value=fake_deposits), \
+         patch.object(Q1ReportGenerator, "_query_expenses_for_cashflow", return_value=fake_expenses_by_cat), \
+         patch.object(Q1ReportGenerator, "_query_top_vendors", return_value=fake_vendors):
+        section = gen._fetch_cashflow()
+    assert section.total_deposits == 300_000.0
+    assert section.total_expenses == 85_000.0
+    # VendorBig is 20000 / 85000 = 23.5% — exceeds 15% threshold
+    assert any("VendorBig" in w for w in section.concentration_warnings)
