@@ -113,3 +113,25 @@ def abc_invoice_page():
 def promoter_payout_page():
     """Promoter payout calculator — replaces 'Other Promoter Days.xlsx' template."""
     return Response(_promoter_payout_html(), mimetype="text/html")
+
+
+from google.cloud import bigquery
+from q1_report import Q1ReportGenerator
+
+
+@bp.route("/q1-report", methods=["GET"])
+def q1_report_html():
+    """Q1 2026 leadership financial report — HTML."""
+    client = bigquery.Client(project="toast-analytics-444116")
+    gen = Q1ReportGenerator(client)
+    data = gen.fetch()
+    return Response(gen.render_html(data), mimetype="text/html")
+
+
+@bp.route("/q1-report.md", methods=["GET"])
+def q1_report_markdown():
+    """Q1 2026 leadership financial report — Markdown."""
+    client = bigquery.Client(project="toast-analytics-444116")
+    gen = Q1ReportGenerator(client)
+    data = gen.fetch()
+    return Response(gen.render_markdown(data), mimetype="text/markdown")
