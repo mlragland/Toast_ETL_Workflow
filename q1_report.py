@@ -174,3 +174,82 @@ class Q1ReportGenerator:
     def render_markdown(self, data: Q1ReportData) -> str:
         """Render markdown. Filled in Task 9."""
         raise NotImplementedError("Implemented in Task 9")
+
+    def _fetch_period_revenue_raw(self, start: str, end: str) -> dict:
+        """Run revenue queries for a single period, returning raw totals dict.
+
+        Reuses query helpers from sba_financial_statements.py.
+        Hookah_reclass is applied AFTER summing — see config.HOOKAH_RECLASS.
+        """
+        from sba_financial_statements import (
+            query_monthly_revenue, query_hookah_revenue_bank,
+            query_hookah_revenue_pos, sum_monthly_data,
+            HOOKAH_RECLASS,
+        )
+
+        monthly = query_monthly_revenue(self.client, start, end)
+        totals = sum_monthly_data(monthly)
+        hookah_pos = sum(query_hookah_revenue_pos(self.client, start, end).values())
+        hookah_bank = sum(query_hookah_revenue_bank(self.client, start, end).values())
+
+        # Apply HOOKAH_RECLASS overrides that fall within the period
+        reclass = 0.0
+        for ym, amt in HOOKAH_RECLASS.items():
+            ym_start = ym.replace("-", "") + "01"
+            if start <= ym_start <= end:
+                reclass += amt
+
+        return {
+            "gross_revenue": totals.get("net_sales", 0.0)
+                + totals.get("service_charge", 0.0)
+                + totals.get("voluntary_tips", 0.0)
+                + hookah_bank + reclass,
+            "pos_revenue": totals.get("net_sales", 0.0),
+            "service_charge": totals.get("service_charge", 0.0),
+            "voluntary_tips": totals.get("voluntary_tips", 0.0),
+            "hookah_pos": hookah_pos,
+            "hookah_bank": hookah_bank,
+            "hookah_reclass": reclass,
+        }
+
+    def _make_period_metrics(self, label: str, raw: dict) -> PeriodMetrics:
+        return PeriodMetrics(
+            label=label,
+            gross_revenue=raw["gross_revenue"],
+            pos_revenue=raw["pos_revenue"],
+            service_charge=raw["service_charge"],
+            voluntary_tips=raw["voluntary_tips"],
+            hookah_pos=raw["hookah_pos"],
+            hookah_bank=raw["hookah_bank"],
+            hookah_reclass=raw["hookah_reclass"],
+        )
+
+    def _fetch_revenue(self) -> RevenueSection:
+        q1_raw = self._fetch_period_revenue_raw(Q1_2026_START, Q1_2026_END)
+        q4_raw = self._fetch_period_revenue_raw(Q4_2025_START, Q4_2025_END)
+        prior_q1_raw = self._fetch_period_revenue_raw(Q1_2025_START, Q1_2025_END)
+
+        monthly = {}
+        for ym in Q1_2026_MONTHS:
+            ym_start = ym.replace("-", "") + "01"
+            # last day of month — quick lookup table for Q1
+            last_day = {"2026-01": "31", "2026-02": "28", "2026-03": "31"}[ym]
+            ym_end = ym.replace("-", "") + last_day
+            m_raw = self._fetch_period_revenue_raw(ym_start, ym_end)
+            monthly[ym] = self._make_period_metrics(ym, m_raw)
+
+        # Category mix from Q1 2026 only
+        from sba_financial_statements import query_revenue_by_category
+        cat_data = query_revenue_by_category(self.client, Q1_2026_START, Q1_2026_END)
+        category_mix = {}
+        for m_data in cat_data.values():
+            for cat, amt in m_data.items():
+                category_mix[cat] = category_mix.get(cat, 0.0) + amt
+
+        return RevenueSection(
+            q1_2026=self._make_period_metrics("Q1 2026", q1_raw),
+            q4_2025=self._make_period_metrics("Q4 2025", q4_raw),
+            q1_2025=self._make_period_metrics("Q1 2025", prior_q1_raw),
+            monthly=monthly,
+            category_mix=category_mix,
+        )
