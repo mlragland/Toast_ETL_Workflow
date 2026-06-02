@@ -187,3 +187,77 @@ def test_fetch_assembles_all_sections():
 
 # Import dataclasses used in this test
 from q1_report import RevenueSection, CostSection, KPISection, StaffSection, CashFlowSection
+
+
+def test_render_markdown_includes_all_sections():
+    gen = Q1ReportGenerator(MagicMock())
+    data = _build_minimal_report_data()
+    md = gen.render_markdown(data)
+    # Section headers
+    assert "# LOV3|HTX — Q1 2026 Leadership Financial Report" in md
+    assert "## A. Revenue Analysis" in md
+    assert "## B. Cost Structure" in md
+    assert "## C. Profitability" in md
+    assert "## D. Operational KPIs" in md
+    assert "## E. Staff Performance" in md
+    assert "## F. Cash Flow & Bank Reconciliation" in md
+    assert "## G. Forward Look" in md
+    # Comparison columns shown
+    assert "Q4 2025" in md
+    assert "Q1 2025" in md
+    # Generation timestamp
+    assert "Generated:" in md
+
+
+from q1_report import (
+    ProfitabilitySection, StaffPerformer, VendorSpend, ForwardLookSection, Q1ReportData,
+)
+
+
+def _build_minimal_report_data() -> Q1ReportData:
+    rev = RevenueSection(
+        q1_2026=PeriodMetrics(label="Q1 2026", gross_revenue=200_000),
+        q4_2025=PeriodMetrics(label="Q4 2025", gross_revenue=180_000),
+        q1_2025=PeriodMetrics(label="Q1 2025", gross_revenue=160_000),
+        monthly={
+            "2026-01": PeriodMetrics(label="2026-01", gross_revenue=60_000),
+            "2026-02": PeriodMetrics(label="2026-02", gross_revenue=65_000),
+            "2026-03": PeriodMetrics(label="2026-03", gross_revenue=75_000),
+        },
+        category_mix={"Food": 60_000, "Liquor": 80_000, "Hookah": 15_000},
+    )
+    costs = CostSection(
+        q1_2026=PeriodMetrics(label="Q1 2026", cogs=40_000, labor=60_000, opex=40_000),
+        q4_2025=PeriodMetrics(label="Q4 2025", cogs=36_000, labor=54_000, opex=36_000),
+        q1_2025=PeriodMetrics(label="Q1 2025", cogs=32_000, labor=48_000, opex=32_000),
+        opex_by_category={"Rent": 20_000, "Marketing": 5_000},
+        labor_pct_revenue=30.0,
+    )
+    profit = ProfitabilitySection(
+        q1_2026=PeriodMetrics(label="Q1 2026", gross_revenue=200_000, ebitda=60_000),
+        q4_2025=PeriodMetrics(label="Q4 2025", gross_revenue=180_000, ebitda=54_000),
+        q1_2025=PeriodMetrics(label="Q1 2025", gross_revenue=160_000, ebitda=48_000),
+        ebitda_margin_q1_2026=30.0, ebitda_margin_q4_2025=30.0, ebitda_margin_q1_2025=30.0,
+    )
+    kpis = KPISection(
+        q1_2026=PeriodMetrics(label="Q1 2026", covers=1000, avg_check=200.0, business_days=52, labor_hours=2000.0),
+        q4_2025=PeriodMetrics(label="Q4 2025", covers=950, avg_check=190.0, business_days=51, labor_hours=1900.0),
+        q1_2025=PeriodMetrics(label="Q1 2025", covers=900, avg_check=178.0, business_days=50, labor_hours=1800.0),
+        revenue_per_labor_hour_q1=100.0, revenue_per_business_day_q1=3846.15,
+    )
+    staff = StaffSection(
+        top_bartenders=[StaffPerformer("Alice", 50_000.0, 200.0)],
+        top_servers=[StaffPerformer("Carol", 60_000.0, 180.0)],
+    )
+    cashflow = CashFlowSection(
+        total_deposits=300_000, total_expenses=140_000,
+        by_category={"Rent": 60_000, "Food": 50_000, "Marketing": 30_000},
+        top_vendors=[VendorSpend("VendorA", 40_000, 0.28)],
+        concentration_warnings=["VendorA represents 28.6% of opex (threshold: 15%)"],
+    )
+    forward = ForwardLookSection(bullets=["item 1", "item 2"])
+    return Q1ReportData(
+        generated_at="2026-06-02 14:00:00 CST",
+        revenue=rev, costs=costs, profitability=profit,
+        kpis=kpis, staff=staff, cashflow=cashflow, forward=forward,
+    )

@@ -193,8 +193,154 @@ class Q1ReportGenerator:
         raise NotImplementedError("Implemented in Task 10")
 
     def render_markdown(self, data: Q1ReportData) -> str:
-        """Render markdown. Filled in Task 9."""
-        raise NotImplementedError("Implemented in Task 9")
+        """Render the full report as markdown."""
+        lines: List[str] = []
+        lines.append("# LOV3|HTX — Q1 2026 Leadership Financial Report")
+        lines.append("")
+        lines.append(f"**Generated:** {data.generated_at}")
+        lines.append("")
+        lines.append("**Period:** January 1 – March 31, 2026")
+        lines.append("")
+
+        # ------ A. Revenue ------
+        lines.append("## A. Revenue Analysis")
+        lines.append("")
+        r = data.revenue
+        lines.append("| Metric | Q1 2026 | Q4 2025 | QoQ % | Q1 2025 | YoY % |")
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        for name, attr in [
+            ("Gross Revenue", "gross_revenue"),
+            ("POS Net Sales", "pos_revenue"),
+            ("Service Charge (20%)", "service_charge"),
+            ("Voluntary Tips", "voluntary_tips"),
+            ("Hookah (POS)", "hookah_pos"),
+            ("Hookah (Bank deposits)", "hookah_bank"),
+            ("Hookah (Reclass)", "hookah_reclass"),
+        ]:
+            lines.append(self._md_row(name, attr, r.q1_2026, r.q4_2025, r.q1_2025))
+        lines.append("")
+        lines.append("**Intra-quarter monthly trend:**")
+        lines.append("")
+        lines.append("| Month | Gross Revenue |")
+        lines.append("|---|---:|")
+        for ym, m in r.monthly.items():
+            lines.append(f"| {ym} | ${m.gross_revenue:,.0f} |")
+        lines.append("")
+        lines.append("**Sales mix (Q1 2026):**")
+        lines.append("")
+        lines.append("| Category | Amount | Share |")
+        lines.append("|---|---:|---:|")
+        total_mix = sum(r.category_mix.values()) or 1
+        for cat, amt in sorted(r.category_mix.items(), key=lambda x: -x[1]):
+            lines.append(f"| {cat} | ${amt:,.0f} | {amt/total_mix*100:.1f}% |")
+        lines.append("")
+
+        # ------ B. Cost Structure ------
+        lines.append("## B. Cost Structure")
+        lines.append("")
+        c = data.costs
+        lines.append("| Metric | Q1 2026 | Q4 2025 | QoQ % | Q1 2025 | YoY % |")
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        for name, attr in [("COGS", "cogs"), ("Labor", "labor"), ("Opex (other)", "opex")]:
+            lines.append(self._md_row(name, attr, c.q1_2026, c.q4_2025, c.q1_2025))
+        lines.append("")
+        lines.append(f"**Labor as % of revenue (Q1 2026):** {c.labor_pct_revenue:.1f}%")
+        lines.append("")
+        lines.append("**Opex by category (Q1 2026):**")
+        lines.append("")
+        lines.append("| Category | Amount |")
+        lines.append("|---|---:|")
+        for cat, amt in sorted(c.opex_by_category.items(), key=lambda x: -x[1]):
+            lines.append(f"| {cat} | ${amt:,.0f} |")
+        lines.append("")
+
+        # ------ C. Profitability ------
+        lines.append("## C. Profitability")
+        lines.append("")
+        p = data.profitability
+        lines.append("| Metric | Q1 2026 | Q4 2025 | QoQ % | Q1 2025 | YoY % |")
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        lines.append(self._md_row("EBITDA", "ebitda", p.q1_2026, p.q4_2025, p.q1_2025))
+        lines.append(f"| EBITDA Margin | {p.ebitda_margin_q1_2026:.1f}% | {p.ebitda_margin_q4_2025:.1f}% | — | {p.ebitda_margin_q1_2025:.1f}% | — |")
+        lines.append("")
+
+        # ------ D. KPIs ------
+        lines.append("## D. Operational KPIs")
+        lines.append("")
+        k = data.kpis
+        lines.append("| Metric | Q1 2026 | Q4 2025 | Q1 2025 |")
+        lines.append("|---|---:|---:|---:|")
+        lines.append(f"| Covers | {k.q1_2026.covers:,} | {k.q4_2025.covers:,} | {k.q1_2025.covers:,} |")
+        lines.append(f"| Average Check | ${k.q1_2026.avg_check:,.2f} | ${k.q4_2025.avg_check:,.2f} | ${k.q1_2025.avg_check:,.2f} |")
+        lines.append(f"| Business Days | {k.q1_2026.business_days} | {k.q4_2025.business_days} | {k.q1_2025.business_days} |")
+        lines.append(f"| Labor Hours | {k.q1_2026.labor_hours:,.0f} | {k.q4_2025.labor_hours:,.0f} | {k.q1_2025.labor_hours:,.0f} |")
+        lines.append(f"| Revenue / Business Day | ${k.revenue_per_business_day_q1:,.0f} | — | — |")
+        lines.append(f"| Revenue / Labor Hour | ${k.revenue_per_labor_hour_q1:,.2f} | — | — |")
+        lines.append("")
+
+        # ------ E. Staff Performance ------
+        lines.append("## E. Staff Performance")
+        lines.append("")
+        s = data.staff
+        lines.append("**Top Bartenders (attribution via KitchenTimings fulfilled_by — service-well drinks):**")
+        lines.append("")
+        lines.append("| Rank | Name | Attributed Revenue |")
+        lines.append("|---|---|---:|")
+        for i, b in enumerate(s.top_bartenders, 1):
+            lines.append(f"| {i} | {b.name} | ${b.attributed_revenue:,.0f} |")
+        lines.append("")
+        lines.append("**Top Servers (includes Bottle Manager walk-in attribution):**")
+        lines.append("")
+        lines.append("| Rank | Name | Attributed Revenue |")
+        lines.append("|---|---|---:|")
+        for i, srv in enumerate(s.top_servers, 1):
+            lines.append(f"| {i} | {srv.name} | ${srv.attributed_revenue:,.0f} |")
+        lines.append("")
+
+        # ------ F. Cash Flow ------
+        lines.append("## F. Cash Flow & Bank Reconciliation")
+        lines.append("")
+        cf = data.cashflow
+        lines.append(f"- **Total Deposits (Q1 2026):** ${cf.total_deposits:,.0f}")
+        lines.append(f"- **Total Expenses (Q1 2026):** ${cf.total_expenses:,.0f}")
+        lines.append("")
+        lines.append("**Expense buckets:**")
+        lines.append("")
+        lines.append("| Category | Amount |")
+        lines.append("|---|---:|")
+        for cat, amt in sorted(cf.by_category.items(), key=lambda x: -x[1]):
+            lines.append(f"| {cat} | ${amt:,.0f} |")
+        lines.append("")
+        lines.append("**Top 10 vendors:**")
+        lines.append("")
+        lines.append("| Vendor | Spend | % of Opex |")
+        lines.append("|---|---:|---:|")
+        for v in cf.top_vendors:
+            lines.append(f"| {v.name} | ${v.spend:,.0f} | {v.pct_of_opex*100:.1f}% |")
+        lines.append("")
+        if cf.concentration_warnings:
+            lines.append("**⚠️ Concentration warnings:**")
+            for w in cf.concentration_warnings:
+                lines.append(f"- {w}")
+            lines.append("")
+
+        # ------ G. Forward Look ------
+        lines.append("## G. Forward Look")
+        lines.append("")
+        for b in data.forward.bullets:
+            lines.append(f"- {b}")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _md_row(self, label: str, attr: str, q1: PeriodMetrics, q4: PeriodMetrics, prior: PeriodMetrics) -> str:
+        cur = getattr(q1, attr)
+        q4v = getattr(q4, attr)
+        prior_v = getattr(prior, attr)
+        qoq = compute_pct_change(cur, q4v)
+        yoy = compute_pct_change(cur, prior_v)
+        qoq_s = f"{qoq:+.1f}%" if qoq is not None else "n/a"
+        yoy_s = f"{yoy:+.1f}%" if yoy is not None else "n/a"
+        return f"| {label} | ${cur:,.0f} | ${q4v:,.0f} | {qoq_s} | ${prior_v:,.0f} | {yoy_s} |"
 
     def _fetch_period_revenue_raw(self, start: str, end: str) -> dict:
         """Run revenue queries for a single period, returning raw totals dict.
