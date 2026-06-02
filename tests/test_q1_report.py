@@ -67,3 +67,20 @@ def test_fetch_revenue_assembles_three_periods():
     assert section.q4_2025.gross_revenue == 100_000.0
     assert section.q1_2025.gross_revenue == 100_000.0
     assert section.q1_2026.label == "Q1 2026"
+
+
+def test_fetch_costs_computes_labor_pct():
+    gen = Q1ReportGenerator(MagicMock())
+    fake_costs = {"cogs": 30_000.0, "labor": 40_000.0, "opex": 20_000.0}
+    fake_revenue = PeriodMetrics(label="Q1 2026", gross_revenue=200_000.0)
+    fake_revenue_section = type("R", (), {
+        "q1_2026": fake_revenue,
+        "q4_2025": PeriodMetrics(label="Q4 2025", gross_revenue=180_000.0),
+        "q1_2025": PeriodMetrics(label="Q1 2025", gross_revenue=160_000.0),
+    })()
+    with patch.object(Q1ReportGenerator, "_fetch_period_costs_raw", return_value=fake_costs), \
+         patch.object(Q1ReportGenerator, "_fetch_opex_by_category", return_value={"Rent": 10_000.0}):
+        section = gen._fetch_costs(fake_revenue_section)
+    assert section.q1_2026.labor == 40_000.0
+    assert section.labor_pct_revenue == pytest.approx(20.0)  # 40000 / 200000 = 20%
+    assert section.opex_by_category == {"Rent": 10_000.0}

@@ -253,3 +253,58 @@ class Q1ReportGenerator:
             monthly=monthly,
             category_mix=category_mix,
         )
+
+    def _fetch_period_costs_raw(self, start: str, end: str) -> dict:
+        """Total cost buckets for a period."""
+        from sba_financial_statements import query_expenses_by_category
+
+        expenses = query_expenses_by_category(self.client, start, end)
+        # query_expenses_by_category returns {month: {category: amount}}
+        totals = {}
+        for m_data in expenses.values():
+            for cat, amt in m_data.items():
+                totals[cat] = totals.get(cat, 0.0) + amt
+
+        cogs = (totals.get("Food", 0.0) + totals.get("Beverage", 0.0)
+                + totals.get("Liquor", 0.0))
+        labor = totals.get("Labor", 0.0) + totals.get("Payroll", 0.0)
+        opex = sum(totals.values()) - cogs - labor
+
+        return {"cogs": cogs, "labor": labor, "opex": opex}
+
+    def _fetch_opex_by_category(self, start: str, end: str) -> Dict[str, float]:
+        from sba_financial_statements import query_expenses_by_category
+        expenses = query_expenses_by_category(self.client, start, end)
+        totals = {}
+        for m_data in expenses.values():
+            for cat, amt in m_data.items():
+                totals[cat] = totals.get(cat, 0.0) + amt
+        # Strip COGS/labor buckets — those have dedicated lines
+        for k in ("Food", "Beverage", "Liquor", "Labor", "Payroll"):
+            totals.pop(k, None)
+        return totals
+
+    def _make_cost_metrics(self, label: str, raw: dict, gross_revenue: float) -> PeriodMetrics:
+        return PeriodMetrics(
+            label=label,
+            gross_revenue=gross_revenue,
+            cogs=raw["cogs"],
+            labor=raw["labor"],
+            opex=raw["opex"],
+        )
+
+    def _fetch_costs(self, revenue: RevenueSection) -> CostSection:
+        q1 = self._fetch_period_costs_raw(Q1_2026_START, Q1_2026_END)
+        q4 = self._fetch_period_costs_raw(Q4_2025_START, Q4_2025_END)
+        prior = self._fetch_period_costs_raw(Q1_2025_START, Q1_2025_END)
+        opex_cats = self._fetch_opex_by_category(Q1_2026_START, Q1_2026_END)
+
+        labor_pct = safe_div(q1["labor"], revenue.q1_2026.gross_revenue) * 100.0
+
+        return CostSection(
+            q1_2026=self._make_cost_metrics("Q1 2026", q1, revenue.q1_2026.gross_revenue),
+            q4_2025=self._make_cost_metrics("Q4 2025", q4, revenue.q4_2025.gross_revenue),
+            q1_2025=self._make_cost_metrics("Q1 2025", prior, revenue.q1_2025.gross_revenue),
+            opex_by_category=opex_cats,
+            labor_pct_revenue=labor_pct,
+        )
