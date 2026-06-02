@@ -102,3 +102,18 @@ def test_fetch_profitability_computes_ebitda_margin():
     # 200000 - (40000+60000+40000) = 60000 EBITDA, 30% margin
     assert section.q1_2026.ebitda == 60_000.0
     assert section.ebitda_margin_q1_2026 == 30.0
+
+
+def test_fetch_kpis_computes_revenue_per_business_day():
+    gen = Q1ReportGenerator(MagicMock())
+    revenue = type("R", (), {
+        "q1_2026": PeriodMetrics(label="Q1 2026", gross_revenue=260_000.0),
+        "q4_2025": PeriodMetrics(label="Q4 2025", gross_revenue=240_000.0),
+        "q1_2025": PeriodMetrics(label="Q1 2025", gross_revenue=200_000.0),
+    })()
+    fake_kpis = {"covers": 1000, "avg_check": 130.0, "business_days": 52, "labor_hours": 2000.0}
+    with patch.object(Q1ReportGenerator, "_fetch_period_kpis_raw", return_value=fake_kpis):
+        section = gen._fetch_kpis(revenue)
+    assert section.q1_2026.covers == 1000
+    assert section.revenue_per_business_day_q1 == pytest.approx(5000.0)  # 260000/52
+    assert section.revenue_per_labor_hour_q1 == pytest.approx(130.0)  # 260000/2000

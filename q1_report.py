@@ -337,3 +337,78 @@ class Q1ReportGenerator:
             ebitda_margin_q4_2025=safe_div(q4.ebitda, q4.gross_revenue) * 100.0,
             ebitda_margin_q1_2025=safe_div(prior.ebitda, prior.gross_revenue) * 100.0,
         )
+
+    def _fetch_period_kpis_raw(self, start: str, end: str) -> dict:
+        """Operational KPIs for a single period."""
+        from config import BUSINESS_DAY_SQL
+
+        sql = f"""
+        WITH checks AS (
+          SELECT DISTINCT check_guid, total_amount, opened_date
+          FROM `toast-analytics-444116.toast_raw.CheckDetails_raw`
+          WHERE DATE({BUSINESS_DAY_SQL.format(dt_col='opened_date')}) BETWEEN @start AND @end
+        ),
+        days AS (
+          SELECT COUNT(DISTINCT DATE({BUSINESS_DAY_SQL.format(dt_col='opened_date')})) AS biz_days
+          FROM `toast-analytics-444116.toast_raw.CheckDetails_raw`
+          WHERE DATE({BUSINESS_DAY_SQL.format(dt_col='opened_date')}) BETWEEN @start AND @end
+        )
+        SELECT
+          (SELECT COUNT(*) FROM checks) AS covers,
+          (SELECT AVG(total_amount) FROM checks) AS avg_check,
+          (SELECT biz_days FROM days) AS business_days
+        """
+        job_config = bigquery.QueryJobConfig(query_parameters=[
+            bigquery.ScalarQueryParameter("start", "DATE",
+                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
+            bigquery.ScalarQueryParameter("end", "DATE",
+                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+        ])
+        row = next(self.client.query(sql, job_config=job_config).result(), None)
+        if row is None:
+            return {"covers": 0, "avg_check": 0.0, "business_days": 0, "labor_hours": 0.0}
+
+        # Labor hours from labor table if it exists; tolerate absence
+        labor_hours = 0.0
+        try:
+            lh_sql = """
+            SELECT SUM(TIMESTAMP_DIFF(out_date, in_date, MINUTE) / 60.0) AS hours
+            FROM `toast-analytics-444116.toast_raw.LaborTimeEntries_raw`
+            WHERE DATE(in_date) BETWEEN @start AND @end
+            """
+            lh_row = next(self.client.query(lh_sql, job_config=job_config).result(), None)
+            if lh_row and lh_row["hours"] is not None:
+                labor_hours = float(lh_row["hours"])
+        except Exception as e:
+            log.warning("Labor hours query failed (table may not exist): %s", e)
+
+        return {
+            "covers": int(row["covers"] or 0),
+            "avg_check": float(row["avg_check"] or 0.0),
+            "business_days": int(row["business_days"] or 0),
+            "labor_hours": labor_hours,
+        }
+
+    def _fetch_kpis(self, revenue: RevenueSection) -> KPISection:
+        q1 = self._fetch_period_kpis_raw(Q1_2026_START, Q1_2026_END)
+        q4 = self._fetch_period_kpis_raw(Q4_2025_START, Q4_2025_END)
+        prior = self._fetch_period_kpis_raw(Q1_2025_START, Q1_2025_END)
+
+        def _kpi_metrics(label, raw, rev_gross):
+            return PeriodMetrics(
+                label=label,
+                gross_revenue=rev_gross,
+                covers=raw["covers"],
+                avg_check=raw["avg_check"],
+                business_days=raw["business_days"],
+                labor_hours=raw["labor_hours"],
+            )
+
+        gross_q1 = revenue.q1_2026.gross_revenue
+        return KPISection(
+            q1_2026=_kpi_metrics("Q1 2026", q1, gross_q1),
+            q4_2025=_kpi_metrics("Q4 2025", q4, revenue.q4_2025.gross_revenue),
+            q1_2025=_kpi_metrics("Q1 2025", prior, revenue.q1_2025.gross_revenue),
+            revenue_per_business_day_q1=safe_div(gross_q1, q1["business_days"]),
+            revenue_per_labor_hour_q1=safe_div(gross_q1, q1["labor_hours"]),
+        )
