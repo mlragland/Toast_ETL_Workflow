@@ -308,3 +308,32 @@ class Q1ReportGenerator:
             opex_by_category=opex_cats,
             labor_pct_revenue=labor_pct,
         )
+
+    def _build_profitability(self, revenue: RevenueSection, costs: CostSection) -> ProfitabilitySection:
+        def ebitda(rev: PeriodMetrics, c: PeriodMetrics) -> float:
+            return rev.gross_revenue - c.cogs - c.labor - c.opex
+
+        q1 = PeriodMetrics(
+            label="Q1 2026",
+            gross_revenue=revenue.q1_2026.gross_revenue,
+            cogs=costs.q1_2026.cogs, labor=costs.q1_2026.labor, opex=costs.q1_2026.opex,
+            ebitda=ebitda(revenue.q1_2026, costs.q1_2026),
+        )
+        q4 = PeriodMetrics(
+            label="Q4 2025",
+            gross_revenue=revenue.q4_2025.gross_revenue,
+            cogs=costs.q4_2025.cogs, labor=costs.q4_2025.labor, opex=costs.q4_2025.opex,
+            ebitda=ebitda(revenue.q4_2025, costs.q4_2025),
+        )
+        prior = PeriodMetrics(
+            label="Q1 2025",
+            gross_revenue=revenue.q1_2025.gross_revenue,
+            cogs=costs.q1_2025.cogs, labor=costs.q1_2025.labor, opex=costs.q1_2025.opex,
+            ebitda=ebitda(revenue.q1_2025, costs.q1_2025),
+        )
+        return ProfitabilitySection(
+            q1_2026=q1, q4_2025=q4, q1_2025=prior,
+            ebitda_margin_q1_2026=safe_div(q1.ebitda, q1.gross_revenue) * 100.0,
+            ebitda_margin_q4_2025=safe_div(q4.ebitda, q4.gross_revenue) * 100.0,
+            ebitda_margin_q1_2025=safe_div(prior.ebitda, prior.gross_revenue) * 100.0,
+        )

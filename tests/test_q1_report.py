@@ -84,3 +84,21 @@ def test_fetch_costs_computes_labor_pct():
     assert section.q1_2026.labor == 40_000.0
     assert section.labor_pct_revenue == pytest.approx(20.0)  # 40000 / 200000 = 20%
     assert section.opex_by_category == {"Rent": 10_000.0}
+
+
+def test_fetch_profitability_computes_ebitda_margin():
+    gen = Q1ReportGenerator(MagicMock())
+    revenue = type("R", (), {
+        "q1_2026": PeriodMetrics(label="Q1 2026", gross_revenue=200_000.0),
+        "q4_2025": PeriodMetrics(label="Q4 2025", gross_revenue=180_000.0),
+        "q1_2025": PeriodMetrics(label="Q1 2025", gross_revenue=160_000.0),
+    })()
+    costs = type("C", (), {
+        "q1_2026": PeriodMetrics(label="Q1 2026", cogs=40_000, labor=60_000, opex=40_000),
+        "q4_2025": PeriodMetrics(label="Q4 2025", cogs=36_000, labor=54_000, opex=36_000),
+        "q1_2025": PeriodMetrics(label="Q1 2025", cogs=32_000, labor=48_000, opex=32_000),
+    })()
+    section = gen._build_profitability(revenue, costs)
+    # 200000 - (40000+60000+40000) = 60000 EBITDA, 30% margin
+    assert section.q1_2026.ebitda == 60_000.0
+    assert section.ebitda_margin_q1_2026 == 30.0
