@@ -153,6 +153,11 @@ def safe_div(num: float, denom: float) -> float:
     return num / denom
 
 
+def _to_iso_date(yyyymmdd: str) -> str:
+    """Convert YYYYMMDD config strings to YYYY-MM-DD for BigQuery DATE params."""
+    return f"{yyyymmdd[:4]}-{yyyymmdd[4:6]}-{yyyymmdd[6:]}"
+
+
 # ---------------------------------------------------------------------
 # Generator (skeleton — sections filled in by later tasks)
 # ---------------------------------------------------------------------
@@ -448,10 +453,11 @@ class Q1ReportGenerator:
             HOOKAH_RECLASS,
         )
 
-        monthly = query_monthly_revenue(self.client, start, end)
+        iso_start, iso_end = _to_iso_date(start), _to_iso_date(end)
+        monthly = query_monthly_revenue(self.client, iso_start, iso_end)
         totals = sum_monthly_data(monthly)
-        hookah_pos = sum(query_hookah_revenue_pos(self.client, start, end).values())
-        hookah_bank = sum(query_hookah_revenue_bank(self.client, start, end).values())
+        hookah_pos = sum(query_hookah_revenue_pos(self.client, iso_start, iso_end).values())
+        hookah_bank = sum(query_hookah_revenue_bank(self.client, iso_start, iso_end).values())
 
         # Apply HOOKAH_RECLASS overrides that fall within the period
         reclass = 0.0
@@ -460,14 +466,16 @@ class Q1ReportGenerator:
             if start <= ym_start <= end:
                 reclass += amt
 
+        # query_monthly_revenue returns `gratuity` (20% service charge) and `tips` (voluntary)
+        service_charge = totals.get("gratuity", 0.0)
+        voluntary_tips = totals.get("tips", 0.0)
         return {
             "gross_revenue": totals.get("net_sales", 0.0)
-                + totals.get("service_charge", 0.0)
-                + totals.get("voluntary_tips", 0.0)
+                + service_charge + voluntary_tips
                 + hookah_bank + reclass,
             "pos_revenue": totals.get("net_sales", 0.0),
-            "service_charge": totals.get("service_charge", 0.0),
-            "voluntary_tips": totals.get("voluntary_tips", 0.0),
+            "service_charge": service_charge,
+            "voluntary_tips": voluntary_tips,
             "hookah_pos": hookah_pos,
             "hookah_bank": hookah_bank,
             "hookah_reclass": reclass,
@@ -499,13 +507,15 @@ class Q1ReportGenerator:
             m_raw = self._fetch_period_revenue_raw(ym_start, ym_end)
             monthly[ym] = self._make_period_metrics(ym, m_raw)
 
-        # Category mix from Q1 2026 only
+        # Category mix from Q1 2026 only — relabel SBA keys to friendly names
         from sba_financial_statements import query_revenue_by_category
-        cat_data = query_revenue_by_category(self.client, Q1_2026_START, Q1_2026_END)
+        cat_data = query_revenue_by_category(self.client, _to_iso_date(Q1_2026_START), _to_iso_date(Q1_2026_END))
+        cat_labels = {"food_rev": "Food", "liquor_rev": "Liquor"}
         category_mix = {}
         for m_data in cat_data.values():
             for cat, amt in m_data.items():
-                category_mix[cat] = category_mix.get(cat, 0.0) + amt
+                label = cat_labels.get(cat, cat)
+                category_mix[label] = category_mix.get(label, 0.0) + amt
 
         return RevenueSection(
             q1_2026=self._make_period_metrics("Q1 2026", q1_raw),
@@ -515,35 +525,43 @@ class Q1ReportGenerator:
             category_mix=category_mix,
         )
 
+    @staticmethod
+    def _classify_category(cat: str) -> str:
+        """Classify SBA-format `{N}. {Section}/{Subcategory}` into cogs/labor/opex bucket."""
+        c = cat.lower()
+        if c.startswith("2.") or "cost of goods sold" in c or "cogs" in c:
+            return "cogs"
+        if c.startswith("3.") or "labor cost" in c or "payroll" in c:
+            return "labor"
+        return "opex"
+
     def _fetch_period_costs_raw(self, start: str, end: str) -> dict:
-        """Total cost buckets for a period."""
+        """Total cost buckets for a period.
+
+        BankCategoryRules uses SBA-format category names like
+        "2. Cost of Goods Sold/Liquor COGS" and "3. Labor Cost (Includes
+        Grat + Tips)/Employee Payroll (FOH, BOH, Salaries & Taxes)".
+        Classify by leading section number.
+        """
         from sba_financial_statements import query_expenses_by_category
 
-        expenses = query_expenses_by_category(self.client, start, end)
-        # query_expenses_by_category returns {month: {category: amount}}
-        totals = {}
+        expenses = query_expenses_by_category(self.client, _to_iso_date(start), _to_iso_date(end))
+        totals = {"cogs": 0.0, "labor": 0.0, "opex": 0.0}
         for m_data in expenses.values():
             for cat, amt in m_data.items():
-                totals[cat] = totals.get(cat, 0.0) + amt
-
-        cogs = (totals.get("Food", 0.0) + totals.get("Beverage", 0.0)
-                + totals.get("Liquor", 0.0))
-        labor = totals.get("Labor", 0.0) + totals.get("Payroll", 0.0)
-        opex = sum(totals.values()) - cogs - labor
-
-        return {"cogs": cogs, "labor": labor, "opex": opex}
+                bucket = self._classify_category(cat)
+                totals[bucket] += amt
+        return totals
 
     def _fetch_opex_by_category(self, start: str, end: str) -> Dict[str, float]:
         from sba_financial_statements import query_expenses_by_category
-        expenses = query_expenses_by_category(self.client, start, end)
-        totals = {}
+        expenses = query_expenses_by_category(self.client, _to_iso_date(start), _to_iso_date(end))
+        opex: Dict[str, float] = {}
         for m_data in expenses.values():
             for cat, amt in m_data.items():
-                totals[cat] = totals.get(cat, 0.0) + amt
-        # Strip COGS/labor buckets — those have dedicated lines
-        for k in ("Food", "Beverage", "Liquor", "Labor", "Payroll"):
-            totals.pop(k, None)
-        return totals
+                if self._classify_category(cat) == "opex":
+                    opex[cat] = opex.get(cat, 0.0) + amt
+        return opex
 
     def _make_cost_metrics(self, label: str, raw: dict, gross_revenue: float) -> PeriodMetrics:
         return PeriodMetrics(
@@ -600,53 +618,58 @@ class Q1ReportGenerator:
         )
 
     def _fetch_period_kpis_raw(self, start: str, end: str) -> dict:
-        """Operational KPIs for a single period."""
-        from config import BUSINESS_DAY_SQL
+        """Operational KPIs for a single period.
 
-        sql = f"""
-        WITH checks AS (
-          SELECT DISTINCT check_guid, total_amount, opened_date
-          FROM `toast-analytics-444116.toast_raw.CheckDetails_raw`
-          WHERE DATE({BUSINESS_DAY_SQL.format(dt_col='opened_date')}) BETWEEN @start AND @end
-        ),
-        days AS (
-          SELECT COUNT(DISTINCT DATE({BUSINESS_DAY_SQL.format(dt_col='opened_date')})) AS biz_days
-          FROM `toast-analytics-444116.toast_raw.CheckDetails_raw`
-          WHERE DATE({BUSINESS_DAY_SQL.format(dt_col='opened_date')}) BETWEEN @start AND @end
-        )
-        SELECT
-          (SELECT COUNT(*) FROM checks) AS covers,
-          (SELECT AVG(total_amount) FROM checks) AS avg_check,
-          (SELECT biz_days FROM days) AS business_days
+        opened_date in CheckDetails_raw is STRING (MM/DD/YY) — use PARSE_DATE.
+        Skips the 4 AM business-day cutoff (not meaningful without hour info).
         """
         job_config = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("start", "DATE",
-                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
-            bigquery.ScalarQueryParameter("end", "DATE",
-                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+            bigquery.ScalarQueryParameter("start", "DATE", _to_iso_date(start)),
+            bigquery.ScalarQueryParameter("end", "DATE", _to_iso_date(end)),
         ])
-        row = next(self.client.query(sql, job_config=job_config).result(), None)
-        if row is None:
-            return {"covers": 0, "avg_check": 0.0, "business_days": 0, "labor_hours": 0.0}
 
-        # Labor hours from labor table if it exists; tolerate absence
+        covers = 0
+        avg_check = 0.0
+        business_days = 0
+        try:
+            sql = """
+            WITH checks AS (
+              SELECT DISTINCT check_id, total, processing_date
+              FROM `toast-analytics-444116.toast_raw.CheckDetails_raw`
+              WHERE processing_date BETWEEN @start AND @end
+            )
+            SELECT
+              COUNT(*) AS covers,
+              AVG(total) AS avg_check,
+              COUNT(DISTINCT processing_date) AS business_days
+            FROM checks
+            """
+            row = next(self.client.query(sql, job_config=job_config).result(), None)
+            if row is not None:
+                covers = int(row["covers"] or 0)
+                avg_check = float(row["avg_check"] or 0.0)
+                business_days = int(row["business_days"] or 0)
+        except Exception as e:
+            log.warning("KPI query failed for %s..%s: %s", start, end, e)
+
         labor_hours = 0.0
         try:
             lh_sql = """
-            SELECT SUM(TIMESTAMP_DIFF(out_date, in_date, MINUTE) / 60.0) AS hours
+            SELECT SUM(COALESCE(regular_hours, 0) + COALESCE(overtime_hours, 0)) AS hours
             FROM `toast-analytics-444116.toast_raw.LaborTimeEntries_raw`
-            WHERE DATE(in_date) BETWEEN @start AND @end
+            WHERE processing_date BETWEEN @start AND @end
+              AND (deleted IS NULL OR deleted = FALSE)
             """
             lh_row = next(self.client.query(lh_sql, job_config=job_config).result(), None)
             if lh_row and lh_row["hours"] is not None:
                 labor_hours = float(lh_row["hours"])
         except Exception as e:
-            log.warning("Labor hours query failed (table may not exist): %s", e)
+            log.warning("Labor hours query failed: %s", e)
 
         return {
-            "covers": int(row["covers"] or 0),
-            "avg_check": float(row["avg_check"] or 0.0),
-            "business_days": int(row["business_days"] or 0),
+            "covers": covers,
+            "avg_check": avg_check,
+            "business_days": business_days,
             "labor_hours": labor_hours,
         }
 
@@ -675,65 +698,58 @@ class Q1ReportGenerator:
         )
 
     def _query_bartender_revenue(self, start: str, end: str) -> List[dict]:
-        """Bartender attribution via KitchenTimings fulfilled_by — NOT POS sales alone."""
-        from config import BUSINESS_DAY_SQL
-        sql = f"""
+        """Bartender contribution via KitchenTimings fulfilled_by — items fulfilled.
+
+        KitchenTimings has no revenue column. We report items fulfilled, which
+        is the proxy for service-well contribution (per memory feedback).
+        Revenue per bartender requires LaborTimeEntries non_cash_sales (their
+        rung-up sales) which is separate.
+        """
+        sql = """
         SELECT
           fulfilled_by AS name,
-          COUNT(DISTINCT check_guid) AS items,
-          SUM(net_price) AS revenue
+          COUNT(*) AS items_fulfilled
         FROM `toast-analytics-444116.toast_raw.KitchenTimings_raw`
-        WHERE DATE({BUSINESS_DAY_SQL.format(dt_col='sent_date')}) BETWEEN @start AND @end
+        WHERE processing_date BETWEEN @start AND @end
           AND fulfilled_by IS NOT NULL
+          AND fulfilled_by != ''
         GROUP BY fulfilled_by
-        ORDER BY revenue DESC
+        ORDER BY items_fulfilled DESC
         LIMIT 10
         """
         job_config = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("start", "DATE",
-                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
-            bigquery.ScalarQueryParameter("end", "DATE",
-                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+            bigquery.ScalarQueryParameter("start", "DATE", _to_iso_date(start)),
+            bigquery.ScalarQueryParameter("end", "DATE", _to_iso_date(end)),
         ])
         try:
-            return [{"name": r["name"], "revenue": float(r["revenue"] or 0), "hours": 0.0}
+            return [{"name": r["name"], "revenue": float(r["items_fulfilled"] or 0), "hours": 0.0}
                     for r in self.client.query(sql, job_config=job_config).result()]
         except Exception as e:
             log.warning("Bartender query failed: %s", e)
             return []
 
     def _query_server_revenue(self, start: str, end: str) -> List[dict]:
-        """Server attribution including Bottle Manager tab name parsing.
+        """Server attribution by check total.
 
-        Bottle Manager is a POS station, not a person. When a check is rung
-        under 'Bottle Manager' but the tab name contains a server name pattern
-        (e.g., 'BM-Maria' or 'Maria-BM'), credit the revenue back to that server.
+        CheckDetails_raw has no tab_name column, so Bottle Manager walk-in
+        revenue cannot be re-attributed at this query layer — those checks
+        will show up under the literal 'Bottle Manager' server name.
         """
-        from config import BUSINESS_DAY_SQL
-        sql = f"""
-        WITH base AS (
-          SELECT
-            CASE
-              WHEN LOWER(server_name) LIKE '%bottle manager%'
-                THEN REGEXP_EXTRACT(tab_name, r'(?i)([A-Za-z]+)')
-              ELSE server_name
-            END AS attributed_name,
-            total_amount
-          FROM `toast-analytics-444116.toast_raw.CheckDetails_raw`
-          WHERE DATE({BUSINESS_DAY_SQL.format(dt_col='opened_date')}) BETWEEN @start AND @end
-        )
-        SELECT attributed_name AS name, SUM(total_amount) AS revenue
-        FROM base
-        WHERE attributed_name IS NOT NULL
-        GROUP BY attributed_name
+        sql = """
+        SELECT
+          server AS name,
+          SUM(total) AS revenue
+        FROM `toast-analytics-444116.toast_raw.CheckDetails_raw`
+        WHERE processing_date BETWEEN @start AND @end
+          AND server IS NOT NULL
+          AND server != ''
+        GROUP BY server
         ORDER BY revenue DESC
         LIMIT 10
         """
         job_config = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("start", "DATE",
-                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
-            bigquery.ScalarQueryParameter("end", "DATE",
-                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+            bigquery.ScalarQueryParameter("start", "DATE", _to_iso_date(start)),
+            bigquery.ScalarQueryParameter("end", "DATE", _to_iso_date(end)),
         ])
         try:
             return [{"name": r["name"], "revenue": float(r["revenue"] or 0), "hours": 0.0}
@@ -799,7 +815,7 @@ class Q1ReportGenerator:
     def _query_top_vendors(self, start: str, end: str) -> List[dict]:
         sql = """
         SELECT
-          COALESCE(vendor_name, description) AS vendor,
+          COALESCE(vendor_normalized, description) AS vendor,
           SUM(ABS(amount)) AS spend
         FROM `toast-analytics-444116.toast_raw.BankTransactions_raw`
         WHERE transaction_date BETWEEN @start AND @end
@@ -809,10 +825,8 @@ class Q1ReportGenerator:
         LIMIT 10
         """
         job_config = bigquery.QueryJobConfig(query_parameters=[
-            bigquery.ScalarQueryParameter("start", "DATE",
-                f"{start[:4]}-{start[4:6]}-{start[6:]}"),
-            bigquery.ScalarQueryParameter("end", "DATE",
-                f"{end[:4]}-{end[4:6]}-{end[6:]}"),
+            bigquery.ScalarQueryParameter("start", "DATE", _to_iso_date(start)),
+            bigquery.ScalarQueryParameter("end", "DATE", _to_iso_date(end)),
         ])
         try:
             return [{"vendor": r["vendor"] or "Unknown", "spend": float(r["spend"] or 0)}
