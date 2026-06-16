@@ -12,6 +12,7 @@ from google.cloud.exceptions import NotFound
 from config import PROJECT_ID, DATASET_ID
 from pipeline import ToastPipeline
 from weekly_report import WeeklyReportGenerator
+from gratuity_report import GratuityReportGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,20 @@ def run_pipeline():
     pipeline = ToastPipeline()
     summary = pipeline.run(processing_date, backfill_days)
 
+    # Load labor time entries for the same date
+    labor_result = {}
+    try:
+        from labor_etl import ToastLaborETL
+        labor_etl = ToastLaborETL()
+        labor_etl.load_lookups()
+        labor_date = processing_date or (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        labor_rows = labor_etl.pull_and_load(labor_date)
+        labor_result = {"labor_rows": labor_rows}
+        logger.info(f"Labor ETL: loaded {labor_rows} time entries for {labor_date}")
+    except Exception as e:
+        logger.error(f"Labor ETL failed (non-blocking): {e}")
+        labor_result = {"labor_error": str(e)}
+
     return jsonify({
         "run_id": summary.run_id,
         "status": summary.status,
@@ -82,7 +97,8 @@ def run_pipeline():
         "files_failed": summary.files_failed,
         "total_rows": summary.total_rows,
         "duration_seconds": (summary.end_time - summary.start_time).total_seconds(),
-        "errors": summary.errors
+        "errors": summary.errors,
+        **labor_result,
     })
 
 
@@ -186,3 +202,42 @@ def weekly_report():
             "status": "error",
             "error": str(e)
         }), 500
+
+
+@bp.route("/gratuity-report", methods=["POST"])
+@require_auth
+def gratuity_report():
+    """
+    Generate and send bi-weekly gratuity breakdown report.
+
+    Request body (all optional):
+    {
+        "period_end": "20260628",   // Sunday date (YYYYMMDD), defaults to latest completed
+        "recipients": ["x@y.com"]   // override recipient list
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    period_end = data.get("period_end")
+    recipients = data.get("recipients")
+    force = bool(data.get("force"))
+
+    try:
+        from gratuity_report import is_payperiod_close_monday
+        from datetime import date as _date
+        # Scheduled weekly Mondays — only fire on pay-period-close Mondays unless overridden
+        if not period_end and not force and not is_payperiod_close_monday(_date.today()):
+            return jsonify({
+                "status": "skipped",
+                "reason": "not a pay-period-close Monday; pass force=true or period_end to override",
+                "today": _date.today().isoformat(),
+            })
+
+        generator = GratuityReportGenerator()
+        result = generator.generate_and_send(period_end, recipients)
+        return jsonify({
+            "status": "success" if result["success_count"] == result["total_recipients"] else "partial",
+            **result,
+        })
+    except Exception as e:
+        logger.error(f"Gratuity report failed: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
