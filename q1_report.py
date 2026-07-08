@@ -429,15 +429,21 @@ class Q1ReportGenerator:
             m_raw = self._fetch_period_revenue_raw(ym_start, ym_end)
             monthly[ym] = self._make_period_metrics(ym, m_raw)
 
-        # Category mix from Q1 2026 only — relabel SBA keys to friendly names
-        from sba_financial_statements import query_revenue_by_category
-        cat_data = query_revenue_by_category(self.client, _to_iso_date(Q1_2026_START), _to_iso_date(Q1_2026_END))
-        cat_labels = {"food_rev": "Food", "liquor_rev": "Liquor"}
-        category_mix = {}
-        for m_data in cat_data.values():
-            for cat, amt in m_data.items():
-                label = cat_labels.get(cat, cat)
-                category_mix[label] = category_mix.get(label, 0.0) + amt
+        # Category mix from Q1 2026 only — relabel SBA keys to friendly names.
+        # sba_financial_statements is a standalone script; if it's not on the
+        # PYTHONPATH (e.g. CI without the file present) skip category_mix.
+        category_mix: dict = {}
+        try:
+            from sba_financial_statements import query_revenue_by_category
+        except ImportError:
+            query_revenue_by_category = None
+        if query_revenue_by_category is not None:
+            cat_data = query_revenue_by_category(self.client, _to_iso_date(Q1_2026_START), _to_iso_date(Q1_2026_END))
+            cat_labels = {"food_rev": "Food", "liquor_rev": "Liquor"}
+            for m_data in cat_data.values():
+                for cat, amt in m_data.items():
+                    label = cat_labels.get(cat, cat)
+                    category_mix[label] = category_mix.get(label, 0.0) + amt
 
         return RevenueSection(
             q1_2026=self._make_period_metrics("Q1 2026", q1_raw),

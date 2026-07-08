@@ -82,7 +82,8 @@ def _stub_q1_data():
 
 
 def test_q1_report_html_returns_200_with_title(client):
-    with patch("routes_dashboards.Q1ReportGenerator") as Gen:
+    with patch("routes_dashboards.bigquery.Client"), \
+         patch("routes_dashboards.Q1ReportGenerator") as Gen:
         Gen.return_value.fetch.return_value = _stub_q1_data()
         Gen.return_value.render_html.return_value = "<!DOCTYPE html><title>LOV3 / Houston — Q1 2026 Financial Review</title>"
         resp = client.get("/q1-report")
@@ -91,7 +92,8 @@ def test_q1_report_html_returns_200_with_title(client):
 
 
 def test_q1_report_markdown_returns_200_with_header(client):
-    with patch("routes_dashboards.Q1ReportGenerator") as Gen:
+    with patch("routes_dashboards.bigquery.Client"), \
+         patch("routes_dashboards.Q1ReportGenerator") as Gen:
         Gen.return_value.fetch.return_value = _stub_q1_data()
         Gen.return_value.render_markdown.return_value = "# LOV3|HTX — Q1 2026 Leadership Financial Report"
         resp = client.get("/q1-report.md")
