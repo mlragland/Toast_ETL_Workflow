@@ -32,3 +32,5 @@
 - `gcloud run deploy` without `--set-env-vars` preserves existing env — safer than re-running full `deploy.sh` for code-only changes.
 - Cloud Build in `us-central1` billed per-second — a full container rebuild is ~90-120s.
 - Cloud Scheduler timezones are IANA (`America/Chicago`), not `CST` — the latter silently falls back to UTC.
+- `gcloud builds submit` bundles the local working directory INCLUDING untracked files. A deploy that works on your machine can silently break on a clean checkout because the bundled untracked file is missing. Always commit any file imported by production code before deploying.
+- Module-level imports of optional deps (openpyxl, reportlab, weasyprint) crash Cloud Run cold start even for routes that never use them. Add the dep to requirements.txt OR lazy-import inside the functions that need it.
