@@ -10,7 +10,19 @@
 - Only make changes that are directly requested or clearly necessary
 - Don't add features, refactor code, or make "improvements" beyond what was asked
 - Don't add docstrings, comments, or type annotations to code you didn't change
-- If a task is going sideways after 2-3 attempts, STOP and re-plan instead of pushing through
+- If a task is going sideways after 2-3 attempts, STOP and switch to plan mode (shift+tab)
+
+## Plan Mode Discipline
+- Start every complex task in plan mode — refine the plan before writing code
+- The moment something goes sideways, return to plan mode and re-plan
+- Don't retry the same failing approach — diagnose why it failed first
+
+## External Services & Data Safety
+- NEVER send real Slack/email/SMS without explicit user confirmation — test channel first (Resend to a test address, Slack to a scratch channel, never `#lov3-leader-report` in dev)
+- NEVER guess API field names (Toast, Resend, Slack) — read the handler + response schema and show the exact shape first
+- NEVER type secrets from memory — read the live value from Secret Manager, verify it works, then use it
+- User-facing timestamps in America/Chicago, never UTC (LOV3 operates in Central time; business day cutoff is 4 AM CT)
+- GET endpoints must never mutate state — Slack/iMessage link-preview crawlers fire GETs. Confirmation page on GET, mutation on POST.
 
 ## Verification
 - After making changes, run `python -c "from main import app; print('OK')"` before declaring done
