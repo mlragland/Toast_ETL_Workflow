@@ -51,3 +51,25 @@
 - Compare SFTP file row count to BigQuery loaded count
 - Validate processing_date matches expected date
 - Alert on anomalies: sudden row count drops, unexpected nulls
+
+## When to ADD a test
+
+- **ALWAYS** add a unit test when introducing a pure function in `services.py` or a new helper module
+- **ALWAYS** add a unit test when introducing a validation schema or dataclass with computed fields
+- **ALWAYS** add a smoke test in `tests/test_smoke.py` when adding a new public route (GET or POST)
+- **ALWAYS** add an integration test when adding a new POST endpoint that writes to BigQuery
+- **ALWAYS** add a regression test when fixing a bug — write the failing test first, then the fix
+
+## When NOT to add a test
+
+- Pure HTML string generators in `dashboards.py` with no logic (label rendering, static markup)
+- Trivial wrappers around already-tested BigQuery / Toast API clients
+- Config constants or lookup tables (fixture-like)
+- One-off standalone scripts (`sba_financial_statements.py`, `toast_api_backfill.py`) — verify via a real run against a known date range instead
+
+## Making code testable
+
+If a pure computation is trapped inside a Flask route handler or a `dashboards.py` HTML generator,
+**move it to `services.py` (or a new helper module) first**, then re-import from the route.
+The test imports the plain module directly and mocks nothing. Applies to: totals calculations,
+category bucketing, tax adjustments, business-day derivation.

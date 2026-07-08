@@ -752,3 +752,13 @@ DEFAULT_FOOD_COGS_PCT = 0.25
 DEFAULT_MIXED_BEV_TAX_PCT = 0.067   # Texas mixed beverage gross receipts tax
 DEFAULT_PROMOTER_PCT = 0.15
 PROMOTER_PAYOUT_TABLE = "PromoterPayouts_raw"
+
+Q1_2026_START = "20260101"
+Q1_2026_END = "20260331"
+Q4_2025_START = "20251001"
+Q4_2025_END = "20251231"
+Q1_2025_START = "20250101"
+Q1_2025_END = "20250331"
+Q1_2026_MONTHS = ["2026-01", "2026-02", "2026-03"]
+Q1_REPORT_FORWARD_LOOK = ["SBA loan package in final review.", "Q2 2026 hookah revenue ~$15-20K monthly.", "Tracked rate $57.07/hr; true rate $66-74/hr est.", "Monitor vendor concentration >15%.", "Capital priority: SBA close, kitchen refresh."]
+VENDOR_CONCENTRATION_THRESHOLD = 0.15

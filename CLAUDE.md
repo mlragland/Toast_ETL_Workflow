@@ -4,7 +4,8 @@
 Flask app on Cloud Run for LOV3 Houston restaurant. Four functions:
 1. **Daily ETL** — Toast POS SFTP → BigQuery (7 CSV file types, runs 6 AM CST via Cloud Scheduler)
 2. **Financial dashboards** — 14 self-contained HTML pages + REST APIs for bank transaction categorization, P&L, labor, loyalty, budget tracking, etc.
-3. **Weekly Report** — Automated weekly performance report sent via Slack (primary) to #lov3-leader-report. Fallback to email via SendGrid. Triggered every Tuesday 10 AM CST by Cloud Scheduler.
+3. **Weekly Report** — Automated weekly performance report sent via Slack (primary) to #lov3-leader-report. Fallback to email via SendGrid (deprecated, replaced by Resend for new reports). Triggered every Tuesday 10 AM CST by Cloud Scheduler.
+5. **Gratuity Breakdown Report** — Bi-weekly leadership PDF/email sent via Resend on pay-period-close Mondays at 6 PM CT. Recipients: Maurice, Eddie, Tiffany, Sossity. Endpoint `/gratuity-report` (auth-gated). Cloud Scheduler `toast-gratuity-report` fires weekly; endpoint self-skips on non-pay-period Mondays.
 4. **SBA Financial Statements** — Standalone scripts generating lender-grade P&L statements from Toast POS + BofA data
 
 **Owner:** Maurice Ragland | **Venue:** LOV3|HTX, Houston
@@ -68,10 +69,17 @@ PROMOTER_PAYOUT_METHODOLOGY.md           → /promoter-payout calc logic, order_
 
 ## Weekly Report Delivery
 - **Primary:** Slack webhook to #lov3-leader-report channel (ID: C0AU9S12362)
-- **Fallback:** SendGrid email (currently expired as of Apr 4, 2026 — not renewed)
+- **Fallback:** SendGrid email (deprecated — expired Apr 4, 2026 and not renewed). New reports use **Resend** instead (see Email Delivery below).
 - **Schedule:** Cloud Scheduler `toast-weekly-report`, Tuesdays 10 AM CST
 - **Env vars:** `SLACK_WEBHOOK_URL` (alerts), `SLACK_REPORT_WEBHOOK` (weekly report channel)
 - SendGrid import is now optional — won't break if not installed
+
+## Email Delivery (Resend)
+- All new transactional/report emails use **Resend** via `gratuity_report.py:send_email()`. Same Resend account that powers `lov3synch` (single verified domain: `lov3htx.com`).
+- API key in Secret Manager: `resend-api-key` (shared with lov3synch on the VPS)
+- From address: `LOV3 Analytics <reports@lov3htx.com>`
+- No SDK dep — uses `requests.post` to `https://api.resend.com/emails`
+- When adding email to a new report, copy the pattern from `gratuity_report.py:send_email` (HTML + plaintext fallback, 30s timeout, structured return).
 
 ## Toast REST API
 - **Auth:** OAuth2 via Secret Manager (`toast-api-client-id`, `toast-api-client-secret`, `toast-restaurant-guid`)
@@ -114,7 +122,8 @@ python backfill_allitems_from_api.py --limit 10
 ## GCP Environment
 - **Project:** toast-analytics-444116 | **Region:** us-central1 | **Dataset:** toast_raw
 - SFTP key in Secret Manager
-- SendGrid API key in Secret Manager (expired Apr 4, 2026 — not renewed)
+- SendGrid API key in Secret Manager (expired Apr 4, 2026 — not renewed; superseded by Resend)
+- Resend API key in Secret Manager (`resend-api-key`) — shared with lov3synch
 - Toast API credentials in Secret Manager
 - Cloud Scheduler triggers `/run` daily at 6 AM CST, `/weekly-report` Tuesdays 10 AM CST
 
@@ -135,7 +144,7 @@ python backfill_allitems_from_api.py --limit 10
 AllItemsReport was reconstructed from Toast Orders API for Mar-Nov 2024 (14,436 rows, 173 dates). 9 dates confirmed as closures (zero orders). Metrics and hierarchy fields are accurate; `parent_id` may not match SFTP export exactly.
 
 ## LOV3 Operations
-- **Open:** Wednesday – Sunday | **Closed:** Monday, Tuesday
+- **Open:** Tuesday – Sunday | **Closed:** Monday
 - **Managers:** Anthony Winn (Tony), Tiffany Loving — show on cash register, not always on POS orders
 - **Security:** Lewis Security Services (external vendor, clocks into Toast Labor API but not POS)
 - **Bussers:** Clock into Toast Labor API, paid via handwritten checks

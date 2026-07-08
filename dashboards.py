@@ -5054,8 +5054,8 @@ def _promoter_payout_html() -> str:
 
   <div class="readout">
     <div class="readout-row"><span>Gross Sales (Liquor + Food + Shisha)</span><span id="rdGross">$0</span></div>
-    <div class="readout-row"><span>COGS Adjustment (Liquor &times; 18% + Food &times; 25%)</span><span id="rdCogs">$0</span></div>
-    <div class="readout-row"><span>Mixed Beverage Tax (Liquor &times; 6.7%)</span><span id="rdMbt">$0</span></div>
+    <div class="readout-row"><span>COGS Adjustment (Liquor &times; <span id="rdLiquorCogsLbl">18</span>% + Food &times; <span id="rdFoodCogsLbl">25</span>%)</span><span id="rdCogs">$0</span></div>
+    <div class="readout-row"><span>Mixed Beverage Tax (Liquor &times; <span id="rdMbtLbl">6.7</span>%)</span><span id="rdMbt">$0</span></div>
     <div class="readout-row strong"><span>Net Sales</span><span id="rdNetSales">$0</span></div>
     <div class="readout-row"><span>Total Expenses</span><span id="rdTotalExp">$0</span></div>
     <div class="readout-row strong"><span>Net Profit</span><span id="rdNetProfit">$0</span></div>
@@ -5216,6 +5216,9 @@ function recompute(){
   $('rdNetProfit').textContent = fmt(netProfit);
   $('rdPayout').textContent = fmt(payout);
   $('rdPct').textContent = num('promoterPct');
+  $('rdLiquorCogsLbl').textContent = num('liquorCogs');
+  $('rdFoodCogsLbl').textContent = num('foodCogs');
+  $('rdMbtLbl').textContent = num('mbtPct');
 
   $('psDate').textContent = $('eventDate').value || '--';
   $('psDay').textContent = $('eventDay').value || '--';
