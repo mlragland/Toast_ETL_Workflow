@@ -252,7 +252,7 @@ class TellerSync:
                 USING (
                     SELECT * EXCEPT(rn) FROM (
                         SELECT *, ROW_NUMBER() OVER (
-                            PARTITION BY transaction_date, description, ROUND(amount, 2)
+                            PARTITION BY transaction_date, description, CAST(ROUND(amount, 2) AS NUMERIC)
                             ORDER BY upload_date DESC
                         ) AS rn
                         FROM `{temp_ref}`
