@@ -432,15 +432,45 @@ class TellerSync:
     # ── Slack Notification ──────────────────────────────────────────────
 
     def _send_slack_report(self, summary: Dict):
-        """Send sync results + system health to Slack."""
+        """Send sync results + system health to Slack.
+
+        Escalates a successful sync to red if the bank data itself is stale
+        (>STALE_DAYS behind today). Catches the case where the sync ran fine
+        but Teller/BofA stopped delivering new transactions.
+        """
         alert = AlertManager(slack_webhook=ALERT_WEBHOOK_URL)
 
-        is_error = summary["status"] != "success"
-        icon = "❌" if is_error else "✅"
+        STALE_DAYS = 4  # tolerates Fri→Tue including a Mon holiday
 
+        is_error = summary["status"] != "success"
+
+        # Detect staleness even on a "successful" run
+        stale_days = None
+        latest_bank_str = (summary.get("health", {})
+                           .get("data_freshness", {})
+                           .get("latest_bank_date"))
+        if not is_error and latest_bank_str:
+            try:
+                latest_bank = datetime.strptime(latest_bank_str, "%Y-%m-%d").date()
+                stale_days = (date.today() - latest_bank).days
+                if stale_days > STALE_DAYS:
+                    is_error = True  # escalate to red alert
+            except (ValueError, TypeError):
+                pass
+
+        icon = "❌" if is_error else "✅"
         msg = f"{icon} *Teller Bank Sync — {date.today().strftime('%b %d, %Y')}*\n\n"
 
-        if is_error:
+        # Prepend a stale-data banner when applicable
+        if stale_days is not None and stale_days > STALE_DAYS:
+            msg += (
+                f"⚠️ *STALE BANK DATA* — latest transaction is *{stale_days} days old* "
+                f"(latest_bank_date={latest_bank_str}). The sync ran cleanly but Teller/BofA "
+                f"has not delivered new transactions. Re-authenticate the Teller Connect "
+                f"enrollment for account js4ie000, then rerun `/api/teller-sync`.\n\n"
+            )
+
+        if summary["status"] != "success":
             msg += f"*Status:* FAILED\n*Error:* {summary.get('error', 'Unknown')}\n"
         else:
             msg += (
