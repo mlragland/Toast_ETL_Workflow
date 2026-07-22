@@ -243,9 +243,21 @@ class TellerSync:
                 target_ref = loader.get_table_ref(table_name)
                 temp_ref = loader.get_table_ref(temp_table)
 
+                # Dedup staging by the MERGE key — BQ MERGE requires ≤1 source
+                # row per target row, and Teller can return legitimate duplicates
+                # on (date, description, amount). Schema has no txn ID to key on,
+                # so pick one arbitrarily per key (newest upload wins).
                 merge_sql = f"""
                 MERGE `{target_ref}` T
-                USING `{temp_ref}` S
+                USING (
+                    SELECT * EXCEPT(rn) FROM (
+                        SELECT *, ROW_NUMBER() OVER (
+                            PARTITION BY transaction_date, description, ROUND(amount, 2)
+                            ORDER BY upload_date DESC
+                        ) AS rn
+                        FROM `{temp_ref}`
+                    ) WHERE rn = 1
+                ) S
                 ON T.transaction_date = S.transaction_date
                    AND T.description = S.description
                    AND ROUND(T.amount, 2) = ROUND(S.amount, 2)
