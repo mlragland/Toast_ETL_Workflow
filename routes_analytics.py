@@ -4630,6 +4630,52 @@ def api_teller_sync():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── SevenRooms Reservations Sync API ────────────────────────────────────────
+
+@bp.route("/api/sevenrooms-sync", methods=["POST"])
+def api_sevenrooms_sync():
+    """Trigger incremental SevenRooms reservations sync into BigQuery.
+
+    Request body (optional):
+        {"updated_since": "2026-07-01T00:00:00Z"}   # ISO 8601 override
+
+    Pulls reservations via GET /reservations using SR's `updated_since` filter
+    plus cursor pagination and MERGEs into SevenRooms_Reservations_raw.
+    Preserves manual updates (MERGE guards on `updated`).
+
+    Scheduled every 15 minutes during service hours via Cloud Scheduler.
+    """
+    import re
+    import os
+
+    # Reuse ETL auth pattern (Cloud Scheduler OIDC, X-Scheduler-Source, or X-Admin-Key).
+    auth_header = request.headers.get("Authorization", "")
+    scheduler = request.headers.get("X-Scheduler-Source", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or scheduler or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    force_updated_since = data.get("updated_since")
+
+    if force_updated_since and not re.match(r"^\d{4}-\d{2}-\d{2}T", str(force_updated_since)):
+        return jsonify({
+            "error": f"Invalid updated_since format: {force_updated_since}. Use ISO 8601 (e.g. 2026-07-01T00:00:00Z)"
+        }), 400
+
+    try:
+        from sevenrooms_sync import SevenRoomsSync
+        srs = SevenRoomsSync()
+        result = srs.sync(force_updated_since=force_updated_since)
+        return jsonify(result), 200 if result["status"] == "success" else 500
+
+    except Exception as e:
+        logger.error(f"SevenRooms sync error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 # ── ABC Staffing Invoice API ─────────────────────────────────────────────────
 
