@@ -26,7 +26,7 @@ from typing import Dict, List, Optional, Tuple
 
 from google.cloud import bigquery
 
-from config import PROJECT_ID, DATASET_ID
+from config import ALERT_WEBHOOK_URL, PROJECT_ID, DATASET_ID
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +255,80 @@ class PrimeCostCalculator:
 
     def compute_rolling_30d(self) -> PrimeCostMonth:
         return self.compute_month(*rolling_30_day_window())
+
+
+# ── Slack alert ─────────────────────────────────────────────────────
+
+def build_slack_message(rolling_30d: PrimeCostMonth,
+                        last_month: PrimeCostMonth,
+                        trailing_avg_pct: float) -> Tuple[str, bool]:
+    """Build the Slack alert message. Returns (msg, is_error)."""
+    grade_label, _ = rolling_30d.grade()
+    is_alert = rolling_30d.prime_pct >= ALERT_PRIME_PCT
+
+    if is_alert:
+        icon = "🔴" if rolling_30d.prime_pct >= ELEVATED_THRESHOLD else "🟡"
+    else:
+        icon = "✅"
+
+    trend_arrow = "↗" if rolling_30d.prime_pct > trailing_avg_pct else "↘"
+
+    msg = f"{icon} *LOV3 Prime Cost — {date.today().strftime('%a %b %-d, %Y')}*\n\n"
+    msg += (
+        f"*Rolling 30-day Prime Cost:* *{rolling_30d.prime_pct:.1f}%* ({grade_label})\n"
+        f"• Real Prime % (ex-tip pass-through): {rolling_30d.prime_pct_real:.1f}%\n"
+        f"• Trend {trend_arrow} vs 12-mo avg of {trailing_avg_pct:.1f}%\n\n"
+        f"*Breakdown (last 30 days):*\n"
+        f"• Gross Revenue: ${rolling_30d.gross_revenue:,.0f}\n"
+        f"• Liquor COGS: ${rolling_30d.liquor_cogs:,.0f} ({rolling_30d.liquor_cogs_pct:.1f}%)\n"
+        f"• Food COGS: ${rolling_30d.food_cogs:,.0f} ({rolling_30d.food_cogs_pct:.1f}%)\n"
+        f"• Labor: ${rolling_30d.labor_total:,.0f} ({rolling_30d.labor_pct:.1f}%)\n\n"
+        f"*Last complete month* ({last_month.month}): "
+        f"Prime {last_month.prime_pct:.1f}% ({last_month.grade()[0]})\n"
+    )
+
+    if is_alert:
+        msg += (
+            f"\n⚠️ *Prime Cost above the {ALERT_PRIME_PCT:.0f}% alert threshold.* "
+            f"Review controllable costs — most leverage sits in labor scheduling. "
+            f"See /prime-cost for the full breakdown."
+        )
+    else:
+        msg += "\nAll clear. See /prime-cost for the full 12-month trend."
+
+    return msg, is_alert
+
+
+def send_prime_cost_slack_report(calc: Optional["PrimeCostCalculator"] = None) -> Dict:
+    """Compute the rolling Prime Cost and post a Slack summary.
+
+    Reuses the existing AlertManager wiring (SLACK_WEBHOOK_URL env var).
+    Called by Cloud Scheduler weekly + on demand via /api/prime-cost-alert.
+    """
+    from services import AlertManager
+
+    calc = calc or PrimeCostCalculator()
+    rolling_30d = calc.compute_rolling_30d()
+    trailing = calc.compute_trailing_months(months_back=12)
+    last_month = trailing[-1] if trailing else rolling_30d
+    trailing_avg = (
+        sum(m.prime_pct for m in trailing) / len(trailing) if trailing else 0.0
+    )
+
+    msg, is_error = build_slack_message(rolling_30d, last_month, trailing_avg)
+    alert = AlertManager(slack_webhook=ALERT_WEBHOOK_URL)
+    alert.send_slack_alert(msg, is_error=is_error)
+
+    return {
+        "status": "success",
+        "prime_pct_30d": round(rolling_30d.prime_pct, 2),
+        "prime_pct_real_30d": round(rolling_30d.prime_pct_real, 2),
+        "trailing_avg_pct": round(trailing_avg, 2),
+        "last_month": last_month.month,
+        "last_month_prime_pct": round(last_month.prime_pct, 2),
+        "alerted": is_error,
+        "grade": rolling_30d.grade()[0],
+    }
 
 
 # ── HTML rendering ──────────────────────────────────────────────────

@@ -214,3 +214,56 @@ def test_render_html_produces_valid_page():
     assert "Prime Cost" in html
     assert "2026-05" in html
     assert "2026-06" in html
+
+
+# ── Slack alert (build + send) ──────────────────────────────────────
+
+from prime_cost import build_slack_message, send_prime_cost_slack_report
+
+
+def test_build_slack_message_green_when_prime_under_threshold():
+    ok = PrimeCostMonth(month="2026-05", gross_revenue=1000, liquor_cogs=200,
+                        food_cogs=100, labor_total=250)  # 55%
+    msg, is_err = build_slack_message(ok, ok, trailing_avg_pct=52.0)
+    assert not is_err
+    assert "✅" in msg
+    assert "55.0%" in msg
+    assert "Good" in msg
+
+
+def test_build_slack_message_red_when_prime_over_threshold():
+    bad = PrimeCostMonth(month="2026-05", gross_revenue=1000, liquor_cogs=250,
+                         food_cogs=100, labor_total=350)  # 70%
+    msg, is_err = build_slack_message(bad, bad, trailing_avg_pct=60.0)
+    assert is_err  # ≥62% threshold
+    assert "🔴" in msg
+    assert "70.0%" in msg
+    assert "alert threshold" in msg
+
+
+def test_build_slack_message_shows_trend_arrow():
+    now = PrimeCostMonth(month="2026-05", gross_revenue=1000, liquor_cogs=200,
+                         food_cogs=100, labor_total=280)  # 58%
+    msg_up, _ = build_slack_message(now, now, trailing_avg_pct=55.0)
+    msg_down, _ = build_slack_message(now, now, trailing_avg_pct=62.0)
+    assert "↗" in msg_up
+    assert "↘" in msg_down
+
+
+def test_send_prime_cost_slack_report_calls_alert_manager():
+    """Verify the sender ties calc → build_slack_message → AlertManager."""
+    calc = _make_calc_with_mocks()
+
+    with patch("services.AlertManager") as MockAlert:
+        instance = MockAlert.return_value
+        result = send_prime_cost_slack_report(calc=calc)
+
+    # Alert was posted
+    instance.send_slack_alert.assert_called_once()
+    posted_msg, kwargs = instance.send_slack_alert.call_args[0], instance.send_slack_alert.call_args.kwargs
+    assert "LOV3 Prime Cost" in posted_msg[0]
+    # Returned status dict includes the key fields
+    assert result["status"] == "success"
+    assert "prime_pct_30d" in result
+    assert "trailing_avg_pct" in result
+    assert "grade" in result

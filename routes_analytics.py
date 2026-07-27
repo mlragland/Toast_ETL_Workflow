@@ -4677,6 +4677,38 @@ def api_sevenrooms_sync():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── Prime Cost Slack Alert API ──────────────────────────────────────────────
+
+@bp.route("/api/prime-cost-alert", methods=["POST"])
+def api_prime_cost_alert():
+    """Compute rolling Prime Cost and post a Slack summary to #lov3-ops.
+
+    Called weekly by Cloud Scheduler (Monday 9 AM CT) and on demand.
+    Fires a red alert when the rolling 30-day Prime % ≥ ALERT_PRIME_PCT (62%);
+    green summary otherwise. Same auth pattern as /api/teller-sync and
+    /api/sevenrooms-sync.
+    """
+    import os
+
+    auth_header = request.headers.get("Authorization", "")
+    scheduler = request.headers.get("X-Scheduler-Source", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or scheduler or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    try:
+        from prime_cost import send_prime_cost_slack_report
+        result = send_prime_cost_slack_report()
+        return jsonify(result), 200
+
+    except Exception as e:
+        logger.error(f"Prime Cost alert error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ── ABC Staffing Invoice API ─────────────────────────────────────────────────
 
 @bp.route("/api/abc-invoice", methods=["POST"])
