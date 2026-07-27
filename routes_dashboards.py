@@ -135,3 +135,21 @@ def q1_report_markdown():
     gen = Q1ReportGenerator(client)
     data = gen.fetch()
     return Response(gen.render_markdown(data), mimetype="text/markdown")
+
+
+@bp.route("/prime-cost", methods=["GET"])
+def prime_cost_html():
+    """Rolling Prime Cost dashboard — auto-extends to future months.
+
+    Prime Cost = (Liquor COGS + Food COGS + Labor) / Gross Revenue.
+    The #1 hospitality operator KPI (Danny Meyer / Cornell benchmark).
+    Data comes from the SBA financial-statements pipeline components —
+    no hardcoded dates, updates every request.
+    """
+    from prime_cost import PrimeCostCalculator, render_html
+    client = bigquery.Client(project="toast-analytics-444116")
+    calc = PrimeCostCalculator(client)
+    trailing = calc.compute_trailing_months(months_back=12)
+    current = calc.compute_partial_current_month()
+    rolling_30d = calc.compute_rolling_30d()
+    return Response(render_html(rolling_30d, current, trailing), mimetype="text/html")
