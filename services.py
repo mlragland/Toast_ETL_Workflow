@@ -668,6 +668,29 @@ class SecretManager:
         """Get SFTP private key"""
         return self.get_secret("toast-sftp-private-key")
 
+    def set_secret(self, secret_name: str, value: str) -> str:
+        """Write a new version of a secret. Creates the secret if missing.
+
+        Returns the fully-qualified version resource name.
+        """
+        parent = f"projects/{self.project_id}"
+        # Try to create the secret if it doesn't exist yet
+        try:
+            self.client.create_secret(request={
+                "parent": parent,
+                "secret_id": secret_name,
+                "secret": {"replication": {"automatic": {}}},
+            })
+        except Exception:
+            # Already exists — ignore
+            pass
+        secret_path = f"{parent}/secrets/{secret_name}"
+        version = self.client.add_secret_version(request={
+            "parent": secret_path,
+            "payload": {"data": value.encode("UTF-8")},
+        })
+        return version.name
+
 
 class ToastSFTPClient:
     """SFTP client for Toast data files"""

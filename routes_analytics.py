@@ -4677,6 +4677,109 @@ def api_sevenrooms_sync():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── Plaid Bank Sync API ─────────────────────────────────────────────────────
+
+@bp.route("/api/plaid-sync", methods=["POST"])
+def api_plaid_sync():
+    """Trigger incremental Plaid /transactions/sync into BigQuery.
+
+    Request body (optional):
+        {"force_full_history": true}   # discard cursor, pull ~24 months
+    """
+    import os
+
+    auth_header = request.headers.get("Authorization", "")
+    scheduler = request.headers.get("X-Scheduler-Source", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or scheduler or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    force_full = bool(data.get("force_full_history"))
+
+    try:
+        from plaid_sync import PlaidSync
+        result = PlaidSync().sync(force_full_history=force_full)
+        return jsonify(result), 200 if result["status"] == "success" else 500
+    except Exception as e:
+        logger.error(f"Plaid sync error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/plaid-link-token", methods=["POST"])
+def api_plaid_link_token():
+    """Create a Plaid Link token for a browser-side widget session.
+
+    Used during initial enrollment or re-enrollment. The link_token is
+    short-lived (~4 hours) and safe to return to the caller.
+    """
+    import os
+
+    auth_header = request.headers.get("Authorization", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    try:
+        from plaid_sync import PlaidSync
+        result = PlaidSync().create_link_token()
+        return jsonify({"link_token": result.get("link_token"),
+                        "expiration": result.get("expiration")}), 200
+    except Exception as e:
+        logger.error(f"Plaid link_token error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/plaid-exchange", methods=["POST"])
+def api_plaid_exchange():
+    """Exchange a public_token from Plaid Link for a permanent access_token.
+
+    Request body: {"public_token": "public-sandbox-..."}
+
+    On success, writes access_token + item_id directly to Secret Manager
+    so the tokens never touch the response body.
+    """
+    import os
+    import subprocess
+
+    auth_header = request.headers.get("Authorization", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    data = request.get_json(silent=True) or {}
+    public_token = data.get("public_token")
+    if not public_token:
+        return jsonify({"error": "public_token required in body"}), 400
+
+    try:
+        from plaid_sync import PlaidSync
+        from services import SecretManager
+        exchange = PlaidSync().exchange_public_token(public_token)
+        # Write both to Secret Manager immediately.
+        sm = SecretManager(os.environ.get("GCP_PROJECT", "toast-analytics-444116"))
+        sm.set_secret("plaid-access-token", exchange["access_token"])
+        sm.set_secret("plaid-item-id", exchange["item_id"])
+        # Return only the item_id (non-sensitive) — token never appears in the response
+        return jsonify({
+            "status": "success",
+            "item_id": exchange["item_id"],
+            "message": "Access token written to Secret Manager as plaid-access-token."
+        }), 200
+    except Exception as e:
+        logger.error(f"Plaid exchange error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ─── Prime Cost Slack Alert API ──────────────────────────────────────────────
 
 @bp.route("/api/prime-cost-alert", methods=["POST"])
