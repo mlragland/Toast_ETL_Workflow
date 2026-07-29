@@ -81,6 +81,23 @@ def _stub_q1_data():
     )
 
 
+def test_comps_returns_html(client):
+    """GET /comps returns HTML — mocks BQ layer."""
+    from unittest.mock import MagicMock
+    from comp_analytics import CompPeriod
+
+    empty = CompPeriod(label="w", start="2026-07-20", end="2026-07-26",
+                       net_sales=0.0, total_comp=0.0)
+    with patch("routes_dashboards.bigquery.Client"), \
+         patch("comp_analytics.CompAnalytics") as CA:
+        CA.return_value.compute_last_week.return_value = empty
+        CA.return_value.compute_prior_week.return_value = empty
+        CA.return_value.compute_trailing_90d.return_value = empty
+        resp = client.get("/comps")
+    assert resp.status_code == 200
+    assert b"Comp Performance" in resp.data
+
+
 def test_q1_report_html_returns_200_with_title(client):
     with patch("routes_dashboards.bigquery.Client"), \
          patch("routes_dashboards.Q1ReportGenerator") as Gen:

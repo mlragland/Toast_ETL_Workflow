@@ -153,3 +153,20 @@ def prime_cost_html():
     current = calc.compute_partial_current_month()
     rolling_30d = calc.compute_rolling_30d()
     return Response(render_html(rolling_30d, current, trailing), mimetype="text/html")
+
+
+@bp.route("/comps", methods=["GET"])
+def comps_html():
+    """Weekly comp performance dashboard — leadership discipline view.
+
+    Categorizes Toast discount activity into an operator taxonomy
+    (programmatic vs discretionary vs owner) and measures against
+    industry benchmarks. Backs the Tuesday leadership Slack report.
+    """
+    from comp_analytics import CompAnalytics, render_html
+    client = bigquery.Client(project="toast-analytics-444116")
+    analytics = CompAnalytics(client)
+    cur = analytics.compute_last_week()
+    prev = analytics.compute_prior_week()
+    trailing_90d = analytics.compute_trailing_90d()
+    return Response(render_html(cur, prev, trailing_90d), mimetype="text/html")

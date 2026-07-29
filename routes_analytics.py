@@ -4780,6 +4780,37 @@ def api_plaid_exchange():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── Weekly Comp Report Slack API ────────────────────────────────────────────
+
+@bp.route("/api/comp-report", methods=["POST"])
+def api_comp_report():
+    """Compute last completed week's comp performance and post a Slack summary.
+
+    Called weekly by Cloud Scheduler (Tuesday 9 AM CT) and on demand.
+    Alert fires when blended comp % ≥6% OR discretionary ≥2%; green summary otherwise.
+    Same auth pattern as /api/prime-cost-alert and /api/teller-sync.
+    """
+    import os
+
+    auth_header = request.headers.get("Authorization", "")
+    scheduler = request.headers.get("X-Scheduler-Source", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or scheduler or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    try:
+        from comp_analytics import send_weekly_comp_report
+        result = send_weekly_comp_report()
+        return jsonify(result), 200
+
+    except Exception as e:
+        logger.error(f"Comp report error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ─── Prime Cost Slack Alert API ──────────────────────────────────────────────
 
 @bp.route("/api/prime-cost-alert", methods=["POST"])
