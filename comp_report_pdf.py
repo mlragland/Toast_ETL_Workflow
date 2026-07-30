@@ -159,6 +159,39 @@ def _pill(text: str, color: colors.Color, size: int = 8) -> Paragraph:
     )
 
 
+# ── Sprint B constants — COGS map + daypart bins ────────────────────
+
+# Blended COGS % by Toast sales_category — sourced from LOV3 P&L (2025 SBA).
+# Refresh quarterly. VIC3 will need its own map.
+COGS_PCT_BY_CATEGORY = {
+    "Liquor": 0.22,          # 22% cost of goods
+    "Champagne": 0.24,
+    "Beer": 0.30,
+    "Bottled Beer": 0.32,
+    "Wine": 0.28,
+    "Food": 0.30,            # 30% cost of goods
+    "Brunch Food": 0.32,
+    "NA Beverage": 0.15,     # low COGS (water, soft drinks)
+    "Modifier": 0.10,
+    "Other": 0.25,           # default
+}
+_DEFAULT_COGS_PCT = 0.25     # if sales_category unknown
+
+# Daypart bins for bottle-service venue analysis
+# Pre-11p: build-up · Peak: bottle service prime · Late: close-out
+DAYPART_BINS = [
+    ("Pre-11p",  17, 23),  # 5pm - 10:59pm
+    ("Peak (11p-1a)", 23, 25),  # 11pm - 12:59am (24=00:00 next day, we use hour%24)
+    ("Late (1a-close)", 1, 3),  # 1am - 2:59am
+]
+
+
+def _cogs_pct(sales_category: Optional[str]) -> float:
+    if not sales_category:
+        return _DEFAULT_COGS_PCT
+    return COGS_PCT_BY_CATEGORY.get(sales_category, _DEFAULT_COGS_PCT)
+
+
 # ── Sprint A dataclasses (bad-behavior + LP-B collusion signals) ─────
 
 
@@ -499,6 +532,148 @@ def fetch_manager_behavior(bq: bigquery.Client, cur: CompPeriod,
     return m
 
 
+# ── Sprint B dataclasses + fetchers ──────────────────────────────────
+
+
+@dataclass
+class DaypartComp:
+    label: str
+    comp_dollars: float = 0.0
+    comp_count: int = 0
+    net_sales: float = 0.0
+
+    @property
+    def comp_pct(self) -> float:
+        return 100.0 * self.comp_dollars / self.net_sales if self.net_sales else 0.0
+
+
+@dataclass
+class TrendSnapshot:
+    """One period's headline metrics for trend line."""
+    label: str
+    net_sales: float
+    total_comp: float
+    manager_disc_pct: float
+    recovery_pct: float
+
+    @property
+    def blended_pct(self) -> float:
+        return 100.0 * self.total_comp / self.net_sales if self.net_sales else 0.0
+
+
+def fetch_daypart_split(bq: bigquery.Client, start: str, end: str
+                         ) -> List[DaypartComp]:
+    """Comp $ + count + net-sales base per daypart bin (Pre-11p / Peak / Late)."""
+    q = f"""
+    WITH parsed AS (
+      SELECT
+        SAFE_CAST(discount AS FLOAT64) AS discount,
+        SAFE.PARSE_TIME('%I:%M %p', opened_time) AS ot
+      FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
+      WHERE processing_date BETWEEN @start AND @end
+        AND SAFE_CAST(discount AS FLOAT64) > 0
+        AND opened_time IS NOT NULL AND opened_time != ''
+    ),
+    bins AS (
+      SELECT
+        CASE
+          WHEN EXTRACT(HOUR FROM ot) BETWEEN 17 AND 22 THEN 'Pre-11p'
+          WHEN EXTRACT(HOUR FROM ot) >= 23 OR EXTRACT(HOUR FROM ot) = 0 THEN 'Peak (11p-1a)'
+          WHEN EXTRACT(HOUR FROM ot) BETWEEN 1 AND 3 THEN 'Late (1a-close)'
+          ELSE 'Other'
+        END AS daypart,
+        discount
+      FROM parsed
+      WHERE ot IS NOT NULL
+    ),
+    net AS (
+      SELECT
+        CASE
+          WHEN EXTRACT(HOUR FROM SAFE.PARSE_TIME('%I:%M %p', opened)) BETWEEN 17 AND 22 THEN 'Pre-11p'
+          WHEN EXTRACT(HOUR FROM SAFE.PARSE_TIME('%I:%M %p', opened)) >= 23
+               OR EXTRACT(HOUR FROM SAFE.PARSE_TIME('%I:%M %p', opened)) = 0 THEN 'Peak (11p-1a)'
+          WHEN EXTRACT(HOUR FROM SAFE.PARSE_TIME('%I:%M %p', opened)) BETWEEN 1 AND 3 THEN 'Late (1a-close)'
+          ELSE 'Other'
+        END AS daypart,
+        SAFE_CAST(amount AS FLOAT64) AS amount
+      FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
+      WHERE processing_date BETWEEN @start AND @end
+        AND opened IS NOT NULL AND opened != ''
+    )
+    SELECT
+      b.daypart,
+      ROUND(SUM(b.discount), 0) AS comp_dollars,
+      COUNT(*) AS comp_count,
+      (SELECT ROUND(SUM(amount), 0) FROM net n WHERE n.daypart = b.daypart) AS net_sales
+    FROM bins b
+    GROUP BY b.daypart
+    """
+    job = bq.query(q, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("start", "DATE", start),
+        bigquery.ScalarQueryParameter("end", "DATE", end),
+    ]))
+    seen = {}
+    for row in job.result():
+        seen[row.daypart] = DaypartComp(
+            label=row.daypart,
+            comp_dollars=float(row.comp_dollars or 0.0),
+            comp_count=int(row.comp_count),
+            net_sales=float(row.net_sales or 0.0),
+        )
+    # Return in canonical order
+    order = ["Pre-11p", "Peak (11p-1a)", "Late (1a-close)", "Other"]
+    return [seen.get(l, DaypartComp(label=l)) for l in order if l in seen or l != "Other"]
+
+
+def fetch_4wk_trend(analytics: CompAnalytics,
+                     end_date: str, weeks_back: int = 4
+                     ) -> List[TrendSnapshot]:
+    """4-week rolling trend on Blended, Manager Disc, Recovery."""
+    snapshots: List[TrendSnapshot] = []
+    end_d = date.fromisoformat(end_date)
+    for w in range(weeks_back - 1, -1, -1):
+        # Each week ends on Sunday. weeks_back=4 means current + 3 prior.
+        wk_end = end_d - timedelta(days=7 * w)
+        wk_start = wk_end - timedelta(days=6)
+        label = f"{wk_start.strftime('%b %-d')}-{wk_end.strftime('%-d')}"
+        p = analytics.compute_period(label, wk_start.isoformat(), wk_end.isoformat())
+        snapshots.append(TrendSnapshot(
+            label=label,
+            net_sales=p.net_sales,
+            total_comp=p.total_comp,
+            manager_disc_pct=p.manager_disc_pct,
+            recovery_pct=p.recovery_pct,
+        ))
+    return snapshots
+
+
+def compute_cogs_drag(cur: CompPeriod) -> Tuple[float, float, Dict[str, float]]:
+    """Compute EBITDA drag from comps.
+
+    Returns (retail_comp_$, cogs_impact_$, by_category_dict).
+    retail_comp_$ = total discretionary + recovery + uncategorized (comp $ we lost as revenue)
+    cogs_impact_$ = sum of item_comp × COGS % (actual margin lost)
+    """
+    retail_total = 0.0
+    cogs_impact = 0.0
+    by_category: Dict[str, float] = {}
+    for it in cur.item_log:
+        if it.discount <= 0:
+            continue
+        # Skip owner_discretion + programmatic (not discretionary)
+        if it.bucket in ("owner_discretion", "programmatic_birthday",
+                         "programmatic_promoter", "programmatic_marketing",
+                         "programmatic_standing"):
+            continue
+        retail_total += it.discount
+        pct = _cogs_pct(it.sales_category)
+        drag = it.discount * pct
+        cogs_impact += drag
+        cat = it.sales_category or "Other"
+        by_category[cat] = by_category.get(cat, 0.0) + drag
+    return retail_total, cogs_impact, by_category
+
+
 # ── Bottle Manager audit ─────────────────────────────────────────────
 
 
@@ -579,7 +754,7 @@ def fetch_bottle_manager_audit(bq: bigquery.Client, start: str, end: str) -> BMA
 # ── Page builders ────────────────────────────────────────────────────
 
 
-def _footer(canv: canvas.Canvas, doc, version: str = "v4.0"):
+def _footer(canv: canvas.Canvas, doc, version: str = "v5.0"):
     canv.saveState()
     canv.setFont("Helvetica", 7)
     canv.setFillColor(BONE)
@@ -626,7 +801,7 @@ def build_cover(cur: CompPeriod) -> List:
         ["Managers", "Tiffany Loving · Anthony Winn · Dajah Bishop"],
         ["Bar Lead", "Ashley Baines"],
         ["Generated", datetime.now().strftime("%B %-d, %Y at %-I:%M %p Central")],
-        ["Document version", "v4.0 · Policy rev 2026-07-29"],
+        ["Document version", "v5.0 · Policy rev 2026-07-29"],
         ["Classification", "CONFIDENTIAL — For Leadership Only"],
     ]
     t = Table(dist_data, colWidths=[1.7 * inch, 4.5 * inch])
@@ -751,6 +926,15 @@ def build_exec_summary(cur: CompPeriod, prev: CompPeriod, tier2_foregone: float,
             "Uncategorized ring-ins",
             "Reason code missing — cannot categorize",
             _money(cur.uncategorized_dollars),
+        ])
+
+    # Sprint B: COGS-drag row (actual EBITDA impact vs headline retail $)
+    retail_c, cogs_drag, _ = compute_cogs_drag(cur)
+    if cogs_drag > 0:
+        risk_rows.append([
+            "COGS drag (EBITDA impact)",
+            f"Retail comp ${retail_c:,.0f} × blended COGS %",
+            _money(cogs_drag),
         ])
     if cash_void_dollars > 0:
         risk_rows.append([
@@ -1000,12 +1184,14 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
     """Page 5 — Manager Performance (Tiffany · Tony · Daja) with peer benchmarks."""
     story = []
     story.append(Paragraph("Page 5 · Manager Performance", STYLE_EYEBROW))
-    story.append(Paragraph("Manager Scorecard — Tiffany · Tony · Daja", STYLE_H1))
+    story.append(Paragraph("Manager Scorecard — Tiffany · Tony · Daja · Ashley", STYLE_H1))
     story.append(Paragraph(
-        "Peer-benchmarked KPIs for the three floor managers. Metrics normalized "
-        "per week; peer median shown for context. Diversity = number of distinct "
-        "comp buckets touched; 1/4 means every comp landed in a single bucket "
-        "(usually 'Manager Comp') — training signal per policy §11.",
+        "Peer-benchmarked KPIs for all four managers (Ashley merged into "
+        "manager category based on duties — she approves Manager Comp checks "
+        "up to $488 per audit). Metrics normalized per week; peer median shown "
+        "for context. Diversity = number of distinct comp buckets touched; "
+        "1/4 means every comp landed in a single bucket (usually 'Manager Comp') "
+        "— training signal per policy §11.",
         STYLE_BODY,
     ))
 
@@ -1180,6 +1366,116 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
         ("LINEABOVE", (0, -1), (-1, -1), 1, BLACK),
     ]))
     story.append(wt)
+
+    story.append(PageBreak())
+    return story
+
+
+def build_daypart_page(cur: CompPeriod, dayparts: List[DaypartComp]) -> List:
+    """Sprint B — Comps by Daypart (bottle-service nightlife KPI)."""
+    story = []
+    story.append(Paragraph("Sprint B · Daypart Analysis", STYLE_EYEBROW))
+    story.append(Paragraph("Comps by Daypart", STYLE_H1))
+    story.append(Paragraph(
+        "Nightlife industry expectation: 65%+ of comp $ concentrates in the "
+        "11pm-1am peak. A blended weekly % masks where the real leakage lives. "
+        "Late (1a-close) window with elevated comp % = end-of-shift dumping "
+        "pattern (per LP audit).",
+        STYLE_BODY,
+    ))
+    story.append(Spacer(1, 0.1 * inch))
+
+    dp_rows = [["Daypart", "Comp $", "Comp Count", "Net Sales", "Comp %"]]
+    total_comp = sum(d.comp_dollars for d in dayparts)
+    for d in dayparts:
+        share = 100.0 * d.comp_dollars / total_comp if total_comp else 0.0
+        dp_rows.append([
+            d.label,
+            f"{_money(d.comp_dollars)} ({share:.0f}%)",
+            str(d.comp_count),
+            _money(d.net_sales),
+            f"{d.comp_pct:.2f}%",
+        ])
+    dt = Table(dp_rows, colWidths=[2.0 * inch, 1.6 * inch, 1.1 * inch,
+                                     1.3 * inch, 1.0 * inch])
+    dt.setStyle(TABLE_STYLE_STANDARD)
+    story.append(dt)
+
+    # Peak concentration check
+    peak = next((d for d in dayparts if d.label == "Peak (11p-1a)"), None)
+    late = next((d for d in dayparts if d.label == "Late (1a-close)"), None)
+    if peak and total_comp:
+        peak_share = 100.0 * peak.comp_dollars / total_comp
+        story.append(Spacer(1, 0.12 * inch))
+        story.append(Paragraph(
+            f"<b>Peak concentration:</b> {peak_share:.0f}% "
+            f"({'on target' if peak_share >= 60 else 'below the ≥65% industry benchmark for bottle-service venues'})",
+            STYLE_BODY,
+        ))
+    if late and total_comp:
+        late_share = 100.0 * late.comp_dollars / total_comp
+        color = RED if late_share > 20 else BLACK
+        story.append(Paragraph(
+            f"<font color='{color.hexval()}'><b>Late (1a-close) share:</b> "
+            f"{late_share:.0f}% — {'elevated · end-of-shift dumping likely' if late_share > 20 else 'within tolerance'}</font>",
+            STYLE_BODY,
+        ))
+
+    story.append(PageBreak())
+    return story
+
+
+def build_trend_page(snapshots: List[TrendSnapshot]) -> List:
+    """Sprint B — 4-week rolling trend on 3 headline metrics."""
+    story = []
+    story.append(Paragraph("Sprint B · Trend Analysis", STYLE_EYEBROW))
+    story.append(Paragraph("4-Week Rolling Trend", STYLE_H1))
+    story.append(Paragraph(
+        "Snapshot vs trajectory. A single-week grade doesn't tell you whether "
+        "discipline is drifting or recovering. Below: the last 4 completed weeks "
+        "for blended comp %, manager discretionary %, and recovery %. Delta "
+        "columns show week-over-week movement.",
+        STYLE_BODY,
+    ))
+    story.append(Spacer(1, 0.1 * inch))
+
+    tr_rows = [["Week", "Net Sales", "Total Comp", "Blended %",
+                "Mgr Disc %", "Recovery %"]]
+    for s in snapshots:
+        tr_rows.append([
+            s.label,
+            _money(s.net_sales),
+            _money(s.total_comp),
+            f"{s.blended_pct:.2f}%",
+            f"{s.manager_disc_pct:.2f}%",
+            f"{s.recovery_pct:.2f}%",
+        ])
+    tt = Table(tr_rows, colWidths=[1.5 * inch, 1.3 * inch, 1.2 * inch, 1.0 * inch,
+                                     1.1 * inch, 1.1 * inch])
+    tt.setStyle(TABLE_STYLE_STANDARD)
+    story.append(tt)
+
+    # Trend commentary
+    if len(snapshots) >= 2:
+        story.append(Spacer(1, 0.12 * inch))
+        blend_delta = snapshots[-1].blended_pct - snapshots[0].blended_pct
+        mgr_delta = snapshots[-1].manager_disc_pct - snapshots[0].manager_disc_pct
+        direction_b = "improving" if blend_delta < 0 else "worsening"
+        direction_m = "improving" if mgr_delta < 0 else "worsening"
+        story.append(Paragraph(
+            f"<b>4-week trajectory:</b> Blended {direction_b} by "
+            f"{abs(blend_delta):.2f}pp · Manager Discretionary {direction_m} by "
+            f"{abs(mgr_delta):.2f}pp.",
+            STYLE_BODY,
+        ))
+        # 4-wk average
+        avg_blend = sum(s.blended_pct for s in snapshots) / len(snapshots)
+        avg_mgr = sum(s.manager_disc_pct for s in snapshots) / len(snapshots)
+        story.append(Paragraph(
+            f"<b>4-week averages:</b> Blended {avg_blend:.2f}% · "
+            f"Manager Discretionary {avg_mgr:.2f}%",
+            STYLE_BODY,
+        ))
 
     story.append(PageBreak())
     return story
@@ -1878,7 +2174,9 @@ def build_pdf(cur: CompPeriod, prev: CompPeriod,
               bm_audit: BMAudit,
               approver_pairs: List[ApproverServerPair],
               reason_mismatches: List[ReasonItemMismatch],
-              behaviors: Dict[str, ManagerBehaviorMetrics]) -> bytes:
+              behaviors: Dict[str, ManagerBehaviorMetrics],
+              dayparts: List[DaypartComp],
+              trend: List[TrendSnapshot]) -> bytes:
     buf = io.BytesIO()
     doc = BaseDocTemplate(
         buf, pagesize=LETTER,
@@ -1898,7 +2196,9 @@ def build_pdf(cur: CompPeriod, prev: CompPeriod,
     story += build_lp_audit(lp_voids, approver_pairs, reason_mismatches)
     story += build_bottle_manager_ledger(bm_audit, cur)
     story += build_manager_scorecard(cur, prev, behaviors)
-    story += build_bar_lead_scorecard(cur, prev, recon)
+    # Bar Lead page removed 2026-07-30 — Ashley merged into MANAGERS
+    story += build_trend_page(trend)
+    story += build_daypart_page(cur, dayparts)
     story += build_birthday_page(recon)
     story += build_best_practices(cur, recon)
     story += build_risks_opportunities(cur, recon, lp_voids, bm_audit)
@@ -1965,14 +2265,17 @@ def generate_and_send(to_email: str,
     reason_mismatches = fetch_reason_item_mismatches(analytics.bq, s, e)
     behaviors = {name: fetch_manager_behavior(analytics.bq, cur, name)
                  for name in MANAGERS}
+    dayparts = fetch_daypart_split(analytics.bq, s, e)
+    trend = fetch_4wk_trend(analytics, e, weeks_back=4)
 
     pdf = build_pdf(cur, prev, recon, lp_voids, bm_audit,
-                    approver_pairs, reason_mismatches, behaviors)
+                    approver_pairs, reason_mismatches, behaviors,
+                    dayparts, trend)
     filename = f"lov3_comp_report_v2_{s}_to_{e}.pdf"
 
     body_html = f"""
     <div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:640px;color:#111">
-    <p>Attached: LOV3 Weekly Comp Discipline Report v4.0 for the week of <b>{label}</b>.</p>
+    <p>Attached: LOV3 Weekly Comp Discipline Report v5.0 for the week of <b>{label}</b>.</p>
     <p><b>Verdict:</b> {cur.grade()[0]} · Blended {cur.total_pct:.2f}% (target &lt;4%)</p>
     <p><b>Money at risk:</b> {_money(sum(m.foregone_revenue for m in cur.tier_2_movements.values()))} Tier 2 foregone
     · {len([f for f in lp_voids if f.is_cash])} cash voids · {sum(1 for c in cur.promoter_caps if c.is_over_cap)} cap breach(es)</p>

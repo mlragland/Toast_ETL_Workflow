@@ -42,8 +42,11 @@ UNCATEGORIZED_ALERT_THRESHOLD = 500.0
 AVG_TIER_1_RETAIL = 300.0
 
 # Named lists per COMP_MANAGEMENT_POLICY.md
-MANAGERS = ["Tiffany Loving", "Anthony Winn", "Dajah Bishop"]
-BAR_LEADS = ["Ashley Baines"]
+# Ashley Baines merged into MANAGERS 2026-07-30 — her duties (approving
+# Manager Comp checks up to $488) align with manager authority. She's now
+# held to the same peer benchmarks as Tiffany/Tony/Daja.
+MANAGERS = ["Tiffany Loving", "Anthony Winn", "Dajah Bishop", "Ashley Baines"]
+BAR_LEADS = []  # reserved for future junior bar-lead roles
 OWNER_TAB_KEYWORDS = ["maurice", "eddie", "derwin", "per maurice", "per eddie"]
 
 # Tier 1 bottles (eligible for promoter comps) — retail below this threshold
