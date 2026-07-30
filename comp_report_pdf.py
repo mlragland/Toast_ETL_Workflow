@@ -314,7 +314,7 @@ def fetch_bottle_manager_audit(bq: bigquery.Client, start: str, end: str) -> BMA
 # ── Page builders ────────────────────────────────────────────────────
 
 
-def _footer(canv: canvas.Canvas, doc, version: str = "v2.0"):
+def _footer(canv: canvas.Canvas, doc, version: str = "v3.0"):
     canv.saveState()
     canv.setFont("Helvetica", 7)
     canv.setFillColor(BONE)
@@ -361,7 +361,7 @@ def build_cover(cur: CompPeriod) -> List:
         ["Managers", "Tiffany Loving · Anthony Winn · Dajah Bishop"],
         ["Bar Lead", "Ashley Baines"],
         ["Generated", datetime.now().strftime("%B %-d, %Y at %-I:%M %p Central")],
-        ["Document version", "v2.0 · Policy rev 2026-07-29"],
+        ["Document version", "v3.0 · Policy rev 2026-07-29"],
         ["Classification", "CONFIDENTIAL — For Leadership Only"],
     ]
     t = Table(dist_data, colWidths=[1.7 * inch, 4.5 * inch])
@@ -638,71 +638,108 @@ def build_bottle_manager_ledger(bm_audit: BMAudit, cur: CompPeriod) -> List:
     return story
 
 
-def build_named_scorecards(cur: CompPeriod, prev: CompPeriod) -> List:
-    """Page 5 — Named Manager Scorecards + Waterfall."""
+def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod) -> List:
+    """Page 5 — Manager Performance (Tiffany · Tony · Daja) with peer benchmarks."""
     story = []
-    story.append(Paragraph("Page 5 · Manager Discipline", STYLE_EYEBROW))
-    story.append(Paragraph("Named Scorecards & Waterfall", STYLE_H1))
+    story.append(Paragraph("Page 5 · Manager Performance", STYLE_EYEBROW))
+    story.append(Paragraph("Manager Scorecard — Tiffany · Tony · Daja", STYLE_H1))
     story.append(Paragraph(
-        "Each named manager reviewed by comp count, discretionary $, and "
-        "reason-code diversity. Ashley (Bar Lead) tracked separately. "
-        "Waterfall reconciles named + Bottle Manager + Uncategorized + Mismatches "
-        "to the headline Manager Discretionary %.",
+        "Peer-benchmarked KPIs for the three floor managers. Metrics normalized "
+        "per week; peer median shown for context. Diversity = number of distinct "
+        "comp buckets touched; 1/4 means every comp landed in a single bucket "
+        "(usually 'Manager Comp') — training signal per policy §11.",
         STYLE_BODY,
     ))
 
+    # Compute peer stats for benchmarking
+    mgr_scores = [cur.named_scorecards.get(n) for n in MANAGERS
+                  if cur.named_scorecards.get(n)]
+    peer_disc = [s.discretionary_comp for s in mgr_scores]
+    peer_disc_median = sorted(peer_disc)[len(peer_disc)//2] if peer_disc else 0.0
+    peer_diversity_median = (
+        sorted([s.reason_code_diversity for s in mgr_scores])[len(mgr_scores)//2]
+        if mgr_scores else 0
+    )
+
+    # ── Peer Benchmark table ──
     story.append(Spacer(1, 0.1 * inch))
-    story.append(Paragraph("SCORECARD", STYLE_H3))
-    mgr_rows = [["Name / Role", "Comps", "Total $", "Discret $", "Recovery $",
-                 "Diversity", "Assigned Action"]]
-    for name in MANAGERS + BAR_LEADS:
+    story.append(Paragraph("PEER BENCHMARKS", STYLE_H3))
+    bench_rows = [
+        ["Metric", "Individual Target", "Peer Median This Week"],
+        ["Manager Discretionary $ per week", "≤ $500", _money(peer_disc_median)],
+        ["Reason-code diversity", "≥ 3 of 4 buckets", f"{peer_diversity_median} / 4"],
+        ["Recovery approvals per week", "target driven by kitchen quality", "—"],
+        ["Owner comp button use", "audit-trail only, no cap", "—"],
+    ]
+    bt = Table(bench_rows, colWidths=[3.0 * inch, 2.2 * inch, 2.0 * inch])
+    bt.setStyle(TABLE_STYLE_STANDARD)
+    story.append(bt)
+
+    # ── Individual manager KPIs ──
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(Paragraph("INDIVIDUAL SCORECARDS", STYLE_H3))
+    mgr_rows = [["Manager", "Comps", "Discret $", "Recovery $",
+                 "Owner Rung", "Diversity", "vs Peer Median"]]
+    for name in MANAGERS:
         s = cur.named_scorecards.get(name)
         if not s:
             continue
-        # Named assignment — top 3 discretionary check IDs
+        # Delta vs peer median
+        delta = s.discretionary_comp - peer_disc_median
+        delta_str = f"+${delta:,.0f}" if delta > 0 else f"−${abs(delta):,.0f}"
+        mgr_rows.append([
+            s.name, str(s.comp_count),
+            _money(s.discretionary_comp), _money(s.recovery_comp),
+            _money(s.owner_comp_rung),
+            f"{s.reason_code_diversity} / 4",
+            delta_str,
+        ])
+    mt = Table(mgr_rows, colWidths=[1.5 * inch, 0.7 * inch, 1.0 * inch, 1.0 * inch,
+                                     1.0 * inch, 0.9 * inch, 1.3 * inch])
+    mt.setStyle(TABLE_STYLE_STANDARD)
+    story.append(mt)
+
+    # ── Manager assignments ──
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(Paragraph("THIS WEEK'S ASSIGNMENTS", STYLE_H3))
+    for name in MANAGERS:
+        s = cur.named_scorecards.get(name)
+        if not s:
+            continue
         top_items = sorted(
             [it for it in cur.item_log if it.server == name and it.discount > 0],
             key=lambda x: -x.discount,
         )[:3]
-        if s.discretionary_comp >= 500 and s.role == "Manager":
-            action_hint = "Review top 3 discretionary comps · reply by Fri EOD"
+        if s.discretionary_comp >= 500:
+            hint = f"Review top 3 discretionary comps"
+            if top_items:
+                hint += ": " + ", ".join(
+                    f"#{it.check_id[-6:]} ({it.menu_item[:14]}) ${it.discount:.0f}"
+                    for it in top_items
+                )
+            hint += " · reply by Fri EOD"
         elif s.reason_code_diversity <= 1 and s.comp_count >= 5:
-            action_hint = "Diversify reason codes · training this week"
+            hint = "Diversify reason codes — attend §11 training Wed pre-shift"
         elif s.comp_count == 0:
-            action_hint = "No comps this week"
+            hint = "No comps this week — no action"
         else:
-            action_hint = "On track — maintain"
-        mgr_rows.append([
-            f"{s.name} · {s.role}",
-            str(s.comp_count),
-            _money(s.total_comp),
-            _money(s.discretionary_comp),
-            _money(s.recovery_comp),
-            f"{s.reason_code_diversity} / 4",
-            action_hint,
-        ])
-    mt = Table(mgr_rows, colWidths=[1.8 * inch, 0.6 * inch, 0.8 * inch, 0.8 * inch,
-                                     0.8 * inch, 0.7 * inch, 2.1 * inch])
-    mt.setStyle(TABLE_STYLE_STANDARD)
-    story.append(mt)
+            hint = "On track — maintain reason-code discipline"
+        story.append(Paragraph(f"<b>{name}:</b> {hint}", STYLE_ACTION))
 
-    # Waterfall
+    # ── Waterfall ──
     story.append(Spacer(1, 0.15 * inch))
     story.append(Paragraph("MANAGER DISCRETIONARY WATERFALL", STYLE_H3))
-    named_disc = sum(s.discretionary_comp for s in cur.named_scorecards.values()
-                     if cur.named_scorecards[s.name].role == "Manager")
+    named_disc = sum(s.discretionary_comp for s in mgr_scores)
     bar_lead_disc = sum(s.discretionary_comp for s in cur.named_scorecards.values()
-                        if cur.named_scorecards[s.name].role == "Bar Lead")
+                        if s.role == "Bar Lead")
     bm_disc = cur.bottle_manager.discretionary_comp
     uncateg = cur.uncategorized_dollars
-    mismatch_dollars = sum(m.amount for m in cur.mismatches
-                           if m.reason_bucket == "discretionary_manager")
     other = max(0, cur.by_bucket.get("discretionary_manager", 0.0)
                 - named_disc - bar_lead_disc - bm_disc)
 
     w_rows = [
         ["Source", "$", "% of Mgr Disc"],
-        ["Named Managers (Tiffany + Tony + Daja)", _money(named_disc), ""],
+        ["Named Managers (Tiffany · Tony · Daja)", _money(named_disc), ""],
         ["Bar Lead (Ashley)", _money(bar_lead_disc), ""],
         ["Bottle Manager pooling station", _money(bm_disc), ""],
         ["Other (unattributed servers)", _money(other), ""],
@@ -724,6 +761,100 @@ def build_named_scorecards(cur: CompPeriod, prev: CompPeriod) -> List:
         ("LINEABOVE", (0, -1), (-1, -1), 1, BLACK),
     ]))
     story.append(wt)
+
+    story.append(PageBreak())
+    return story
+
+
+def build_bar_lead_scorecard(cur: CompPeriod, prev: CompPeriod,
+                              recon: BirthdayReconciliationResult) -> List:
+    """Page 6 — Bar Lead Scorecard (Ashley) — own KPI category."""
+    story = []
+    story.append(Paragraph("Page 6 · Bar Lead Performance", STYLE_EYEBROW))
+    story.append(Paragraph("Bar Lead Scorecard — Ashley Baines", STYLE_H1))
+    story.append(Paragraph(
+        "Ashley is tracked in her own performance category — her volume profile "
+        "is legitimately different from floor managers (bar spillage recovery, "
+        "birthday-package champagne delivery, high item-ring volume). Metrics "
+        "here are peer-of-one; benchmarks are her own 4-week trend and role-"
+        "specific targets.",
+        STYLE_BODY,
+    ))
+
+    a = cur.named_scorecards.get("Ashley Baines")
+    a_prev = prev.named_scorecards.get("Ashley Baines")
+
+    # Bar Lead specific metrics for the current week
+    ashley_items = [it for it in cur.item_log if it.server == "Ashley Baines"
+                    and it.discount > 0]
+    # Recovery = tab starts with Spill/Bug/Broke
+    recovery_items = [it for it in ashley_items
+                     if it.tab_name and any(
+                         it.tab_name.lower().startswith(kw) or "broke" in it.tab_name.lower()
+                         for kw in ("spill", "bug", "bottle broke")
+                     )]
+    # Birthday delivery items (OWNER champagne on bday tabs)
+    bday_champagne = [it for it in ashley_items
+                      if it.tab_name and ("bday" in it.tab_name.lower()
+                                          or "birthday" in it.tab_name.lower())
+                      and any(kw in it.menu_item.lower()
+                              for kw in ("moet", "bellaire", "wycliff"))]
+
+    story.append(Spacer(1, 0.1 * inch))
+    story.append(Paragraph("BAR LEAD KPIs", STYLE_H3))
+    kpi_rows = [
+        ["Metric", "This Week", "Prior Week", "Role Target"],
+        ["Total comp count",
+         str(a.comp_count if a else 0),
+         str(a_prev.comp_count if a_prev else 0),
+         "role-driven"],
+        ["Discretionary $",
+         _money(a.discretionary_comp if a else 0),
+         _money(a_prev.discretionary_comp if a_prev else 0),
+         "≤ $500 / week"],
+        ["Recovery items (Spill / Bug / Broke)",
+         f"{len(recovery_items)} items · {_money(sum(i.discount for i in recovery_items))}",
+         "—",
+         "≤ 20 items · ≤ $200"],
+        ["Birthday champagne rings (Fri / Sat)",
+         f"{len(bday_champagne)} bottles · {_money(sum(i.gross_price for i in bday_champagne))}",
+         "—",
+         "1 per eligible pre-reg party"],
+        ["Reason-code diversity",
+         f"{a.reason_code_diversity if a else 0} / 4",
+         f"{a_prev.reason_code_diversity if a_prev else 0} / 4",
+         "≥ 3 / 4 buckets"],
+    ]
+    kt = Table(kpi_rows, colWidths=[2.6 * inch, 1.8 * inch, 1.2 * inch, 1.6 * inch])
+    kt.setStyle(TABLE_STYLE_STANDARD)
+    story.append(kt)
+
+    # ── Birthday delivery ratio (Ashley-specific) ──
+    fri_sat_pre_reg = [r for r in recon.eligible_reservations
+                       if date.fromisoformat(r.date).weekday() in (4, 5)]
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(Paragraph("BIRTHDAY DELIVERY RATIO (Fri / Sat)", STYLE_H3))
+    story.append(Paragraph(
+        f"Fri/Sat pre-registered parties this week: <b>{len(fri_sat_pre_reg)}</b> · "
+        f"Ashley's OWNER champagne rings on bday tabs: <b>{len(bday_champagne)}</b> · "
+        f"Coverage: <b>"
+        f"{100 * len(bday_champagne) / max(len(fri_sat_pre_reg), 1):.0f}%"
+        f"</b> (target 100% via Bday-F/S-{{Name}} convention)",
+        STYLE_BODY,
+    ))
+
+    # ── Assignment ──
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(Paragraph("THIS WEEK'S ASSIGNMENT", STYLE_H3))
+    if a and a.discretionary_comp >= 500:
+        assign = "Review top 3 discretionary comps · reply by Fri EOD"
+    elif len(recovery_items) > 20:
+        assign = "Recovery volume elevated — root-cause with kitchen"
+    elif not bday_champagne and len(fri_sat_pre_reg) > 0:
+        assign = "Adopt Bday-F/S-{FirstName} tab naming so delivery is attributable"
+    else:
+        assign = "On track — continue current pattern"
+    story.append(Paragraph(f"<b>Ashley:</b> {assign}", STYLE_ACTION))
 
     story.append(PageBreak())
     return story
@@ -797,6 +928,330 @@ def build_birthday_page(recon: BirthdayReconciliationResult) -> List:
         "(declined), Chelsea (left early)'</i>. See TAB_NAMING_STANDARDS.md §10.2.",
         STYLE_BODY,
     ))
+
+    story.append(PageBreak())
+    return story
+
+
+def build_best_practices(cur: CompPeriod,
+                          recon: BirthdayReconciliationResult) -> List:
+    """Page 8 — Best Practices identified from data analysis (staff-facing)."""
+    story = []
+    story.append(Paragraph("Page 8 · Learning From Excellence", STYLE_EYEBROW))
+    story.append(Paragraph("Best Practices — Staff Highlights", STYLE_H1))
+    story.append(Paragraph(
+        "Patterns identified during audit that other staff should emulate. "
+        "Each practice is tied to the manager or server who demonstrated it. "
+        "Weekly recognition of these builds the operating culture we want.",
+        STYLE_BODY,
+    ))
+
+    story.append(Spacer(1, 0.1 * inch))
+    story.append(Paragraph("PATTERNS TO EMULATE", STYLE_H3))
+
+    practices = [
+        {
+            "who": "Michelle Rojas & Jordyn Aiken",
+            "what": "Wednesday Birthday Package delivery — textbook execution",
+            "detail": "Rings the birthday party's Bellaire Rose BTL FULLY COMPED "
+                      "($169) on a properly-named 'Wednesday Bday Package- E1/E2' "
+                      "tab. This is the intended policy pattern (§9.1 Birthday "
+                      "Package). Verified in the data multiple times over 90 days."
+        },
+        {
+            "who": "Tiffany Loving",
+            "what": "Owner Tasting tab naming — correct attribution",
+            "detail": "Uses 'Lalo Tasting' tab format when hosting owner tasting "
+                      "events. Reconciler cleanly routes to Owner Discretionary "
+                      "bucket without ambiguity. Sets the standard for §3 Owner "
+                      "Tasting convention in TAB_NAMING_STANDARDS.md."
+        },
+        {
+            "who": "Dajah Bishop",
+            "what": "Reason-code diversity — cleanest of the manager cohort",
+            "detail": "Uses Owner Comp, Birthday, and Manager Comp reason codes "
+                      "in their proper contexts (3/4 buckets over 90 days). "
+                      "Contrast: Tony's 1/4 (all Manager Comp) reflects category "
+                      "collapse — the drift the policy §11 wants to prevent."
+        },
+        {
+            "who": "Laiba Ejaz",
+            "what": "Wycliffe host-stand welcome tracking",
+            "detail": "Rings OWNER WYCLIFF BTL on 'Door' tabs when pouring the "
+                      "waiting-guest welcome champagne. Only server consistently "
+                      "capturing this program per policy §10, making Wycliffe "
+                      "inventory pull traceable."
+        },
+        {
+            "who": "Bottle Manager (station discipline)",
+            "what": "Owner tab attribution — clear naming",
+            "detail": "Uses 'Per Maurice', 'Maurice E9', 'Owner Maurice' tab "
+                      "conventions when running owner-designated tabs. "
+                      "Reconciler correctly attributes to Owner Personal without "
+                      "ambiguity (§3.1)."
+        },
+    ]
+
+    # Insert a "this week" callout if any manager beat the peer median
+    top_this_week = None
+    for name in MANAGERS + BAR_LEADS:
+        s = cur.named_scorecards.get(name)
+        if not s:
+            continue
+        if s.reason_code_diversity >= 3 and s.comp_count > 0 and s.discretionary_comp < 500:
+            top_this_week = name
+            break
+    if top_this_week:
+        practices.insert(0, {
+            "who": top_this_week + " (this week)",
+            "what": "Clean discipline this reporting week",
+            "detail": (
+                f"Ran with high reason-code diversity + discretionary comps under "
+                f"target this week. Sustained performance qualifies for quarterly "
+                f"recognition per policy §11.3."
+            ),
+        })
+
+    for p in practices:
+        story.append(Paragraph(
+            f"<b>{p['who']}</b> · <i>{p['what']}</i>",
+            STYLE_ACTION,
+        ))
+        story.append(Paragraph(p["detail"], STYLE_SMALL))
+        story.append(Spacer(1, 0.06 * inch))
+
+    story.append(PageBreak())
+    return story
+
+
+def build_risks_opportunities(cur: CompPeriod,
+                                recon: BirthdayReconciliationResult,
+                                lp_voids: List[LPVoidRecord],
+                                bm_audit: BMAudit) -> List:
+    """Page 9 — Risks & Opportunities identified from analysis."""
+    story = []
+    story.append(Paragraph("Page 9 · Forward Look", STYLE_EYEBROW))
+    story.append(Paragraph("Risks & Opportunities", STYLE_H1))
+    story.append(Paragraph(
+        "Systemic risks (leakage / fraud / non-compliance) and opportunities "
+        "(revenue recovery / process improvement) surfaced during the audit. "
+        "Each item is either monitored, in progress, or awaiting decision.",
+        STYLE_BODY,
+    ))
+
+    # Compute observations dynamically
+    tier2_foregone = sum(m.foregone_revenue for m in cur.tier_2_movements.values())
+    cash_voids = [f for f in lp_voids if f.is_cash]
+    self_approved = [f for f in lp_voids if f.is_self_approved]
+    failures = [r for r in recon.reservations if r.status == NOT_DELIVERED]
+
+    risks = []
+    opportunities = []
+
+    if cash_voids or self_approved:
+        risks.append((
+            "Post-payment cash/self-approved voids",
+            f"{len(cash_voids)} cash voids · {len(self_approved)} self-approved. "
+            f"Highest-loss hospitality fraud vector. Manager gate-keeping not "
+            f"enforced at time-of-void."
+        ))
+    if tier2_foregone > 3000:
+        risks.append((
+            "Tier 2 bottle leakage",
+            f"${tier2_foregone:,.0f} in retail value moved with no cost recovery. "
+            f"OWNER-SKU rings used to substitute for retail sales."
+        ))
+    if failures:
+        risks.append((
+            "Birthday-package policy failures",
+            f"{len(failures)} pre-registered parties this week received no "
+            f"champagne despite meeting the $200 minimum on a program day."
+        ))
+    if cur.uncategorized_dollars > UNCATEGORIZED_ALERT_THRESHOLD:
+        risks.append((
+            "Uncategorized ring-in discipline",
+            f"${cur.uncategorized_dollars:,.0f} in Open $/% ring-ins with no "
+            f"reason code — cannot classify or audit."
+        ))
+    if bm_audit.owner_sku_rings > 5:
+        risks.append((
+            "Bottle Manager station anonymity",
+            f"{bm_audit.owner_sku_rings} OWNER-SKU rings under the pooling "
+            f"station this week ({_money(bm_audit.owner_sku_dollars)}). "
+            f"Personal accountability blocked until BM role is formalized."
+        ))
+    for cap in cur.promoter_caps:
+        if cap.is_over_cap:
+            risks.append((
+                f"Promoter cap breach — {cap.event}",
+                f"{cap.excess_bottles} bottle(s) over cap. "
+                f"{'Clawback billable' if cap.cap_type == 'external' else 'In-house excess spend'}."
+            ))
+
+    # Opportunities
+    opportunities.append((
+        "Adopt Bday-{D}-{Name} tab naming",
+        "Deterministic 1:1 reconciliation, no inventory double-count. Ends the "
+        "'off-book speculative' delivery bucket. Adds ~5 min to end-of-shift "
+        "close. Ready to roll out this week."
+    ))
+    opportunities.append((
+        "Dedicated Birthday Champagne SKU",
+        "Distinguishes birthday-package delivery from OWNER-SKU owner-discretionary "
+        "consumption at the ring-in level. Removes the classifier's tab-name "
+        "dependency. Coordinate with Toast rep."
+    ))
+    opportunities.append((
+        "Replicate Michelle's Wed pattern to Fri/Sat/Sun",
+        "Standardize the Bellaire-fully-comped delivery Michelle uses on Wed to "
+        "the other program days. Simpler reconciliation and matches policy §9.1 "
+        "'complimentary champagne bottle' language."
+    ))
+    opportunities.append((
+        "PIN-lock Owner Comp button",
+        "Ownership retains audit visibility on every use. Pending §16.1 leadership "
+        "decision."
+    ))
+    opportunities.append((
+        "Formalize Bottle Manager as named role",
+        "Convert pooling station to scheduled role with named assignments. Preserves "
+        "pooling economics while unlocking accountability. Pending §16.3 decision."
+    ))
+    if bm_audit.voids_over_100 > 0:
+        opportunities.append((
+            "Bottle void root-cause investigation",
+            f"{bm_audit.voids_over_100} high-value bottle voids "
+            f"({_money(bm_audit.voids_dollars)}) at the Bottle Manager station "
+            f"this week. Common root causes: ring-in errors, guest changed order, "
+            f"breakage. Establish a void-reason POS prompt."
+        ))
+
+    # Render Risks
+    story.append(Spacer(1, 0.1 * inch))
+    story.append(Paragraph("RISKS", STYLE_H3))
+    if risks:
+        for title, detail in risks:
+            story.append(Paragraph(
+                f"<font color='#C97064'><b>▲ {title}</b></font>",
+                STYLE_ACTION,
+            ))
+            story.append(Paragraph(detail, STYLE_SMALL))
+            story.append(Spacer(1, 0.05 * inch))
+    else:
+        story.append(Paragraph("✓ No material risks surfaced this week.", STYLE_BODY))
+
+    # Render Opportunities
+    story.append(Spacer(1, 0.1 * inch))
+    story.append(Paragraph("OPPORTUNITIES", STYLE_H3))
+    for title, detail in opportunities:
+        story.append(Paragraph(
+            f"<font color='#7FB069'><b>◆ {title}</b></font>",
+            STYLE_ACTION,
+        ))
+        story.append(Paragraph(detail, STYLE_SMALL))
+        story.append(Spacer(1, 0.05 * inch))
+
+    story.append(PageBreak())
+    return story
+
+
+def build_action_plan(cur: CompPeriod,
+                       recon: BirthdayReconciliationResult,
+                       lp_voids: List[LPVoidRecord]) -> List:
+    """Page 10 — 30/60/90-day Action Plan with owners + success criteria."""
+    story = []
+    story.append(Paragraph("Page 10 · Roadmap", STYLE_EYEBROW))
+    story.append(Paragraph("Action Plan — 30 / 60 / 90 Days", STYLE_H1))
+    story.append(Paragraph(
+        "Roadmap to close discipline gaps and lock in best practices. Each action "
+        "carries an owner, deadline, and success criterion measurable in the "
+        "weekly report. Tracked at the Tuesday leadership meeting.",
+        STYLE_BODY,
+    ))
+
+    # ── 30 DAYS ──
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(Paragraph("NEXT 30 DAYS — Immediate", STYLE_H3))
+    d30 = [
+        ["Action", "Owner", "Success Criterion", "Deadline"],
+        ["Roll out Bday-{D}-{Name} tab naming convention",
+         "Ashley + all managers", "≥ 50% adoption on Fri/Sat", "2026-08-06 pre-shift"],
+        ["Same-day cash-drawer review + camera pull for flagged voids",
+         "Ownership", "Report to LP file", "24 hours after flag"],
+        ["Train Tony on reason-code diversity (§11)",
+         "Maurice + Tony", "Diversity ≥ 3/4 in weekly report", "2026-08-05"],
+        ["Investigate Sat 06-20 & 07-18 shift roster (5+ birthday policy failures each)",
+         "Ashley + shift managers", "Root cause documented", "2026-08-08"],
+        ["Replicate Michelle's Wed Bellaire pattern to other days",
+         "Ashley (Bar Lead)", "1 fully-comped Bellaire per Fri/Sat pre-reg party",
+         "2026-08-06"],
+        ["Enforce reason codes on Open $ / Open % ring-ins",
+         "All managers", "Uncategorized $ = $0 in weekly report", "2026-08-13"],
+    ]
+    if any(f.is_self_approved for f in lp_voids):
+        d30.append([
+            "Implement pre-void manager PIN gate at POS",
+            "Maurice + Toast rep",
+            "Zero self-approved voids in weekly report",
+            "2026-08-13",
+        ])
+    dt = Table(d30, colWidths=[2.5 * inch, 1.6 * inch, 1.9 * inch, 1.2 * inch])
+    dt.setStyle(TABLE_STYLE_STANDARD)
+    story.append(dt)
+
+    # ── 60 DAYS ──
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph("NEXT 60 DAYS — Structural", STYLE_H3))
+    d60 = [
+        ["Action", "Owner", "Success Criterion", "Deadline"],
+        ["Deploy dedicated Birthday Champagne SKU family",
+         "Maurice + Toast rep",
+         "SKU-based birthday detection (no tab-name dependency)",
+         "2026-08-30"],
+        ["Formalize Bottle Manager into named role with schedule",
+         "Ownership + Ops",
+         "Every BM shift has a named operator on the roster",
+         "2026-09-01"],
+        ["PIN-lock Owner Comp button (§16.1 decision)",
+         "Ownership",
+         "Slack notification on every Owner Comp use", "2026-08-20"],
+        ["Wycliffe host-stand systematic ring-in enforcement",
+         "Front-of-house + host stand",
+         "Wycliffe bottle pull matches Toast rings weekly", "2026-08-27"],
+        ["Manager quarterly recognition ceremony (policy §11.3)",
+         "Ownership",
+         "Top-diversity manager named at Sept leadership meeting",
+         "2026-09-15"],
+    ]
+    d6t = Table(d60, colWidths=[2.5 * inch, 1.6 * inch, 1.9 * inch, 1.2 * inch])
+    d6t.setStyle(TABLE_STYLE_STANDARD)
+    story.append(d6t)
+
+    # ── 90 DAYS ──
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph("NEXT 90 DAYS — Strategic", STYLE_H3))
+    d90 = [
+        ["Action", "Owner", "Success Criterion", "Deadline"],
+        ["Migrate comp policy compliance into automated Slack alerts",
+         "Maurice + Analytics",
+         "Real-time alerts on policy breaches", "2026-10-01"],
+        ["Complete VIP Comp bucket definition + guest list (§16.2)",
+         "Ownership",
+         "VIP monthly cap defined + tracked", "2026-10-15"],
+        ["Establish quarterly leadership policy review cadence",
+         "Ownership + Managers",
+         "First formal review complete", "2026-10-30"],
+        ["Bar Lead pattern documentation for training onboarding",
+         "Ashley + Maurice",
+         "Playbook signed off; used in next bar hire",
+         "2026-10-30"],
+        ["Roll out staff training program from TAB_NAMING_STANDARDS.md",
+         "All managers",
+         "100% shift-meeting attendance tracked", "2026-11-15"],
+    ]
+    d9t = Table(d90, colWidths=[2.5 * inch, 1.6 * inch, 1.9 * inch, 1.2 * inch])
+    d9t.setStyle(TABLE_STYLE_STANDARD)
+    story.append(d9t)
 
     story.append(PageBreak())
     return story
@@ -1020,8 +1475,12 @@ def build_pdf(cur: CompPeriod, prev: CompPeriod,
     story += build_exec_summary(cur, prev, tier2_foregone, lp_voids)
     story += build_lp_audit(lp_voids)
     story += build_bottle_manager_ledger(bm_audit, cur)
-    story += build_named_scorecards(cur, prev)
+    story += build_manager_scorecard(cur, prev)
+    story += build_bar_lead_scorecard(cur, prev, recon)
     story += build_birthday_page(recon)
+    story += build_best_practices(cur, recon)
+    story += build_risks_opportunities(cur, recon, lp_voids, bm_audit)
+    story += build_action_plan(cur, recon, lp_voids)
     story += build_promoter_recap(cur)
     story += build_return_to_green(cur, recon)
     story += build_appendix(cur, recon)
@@ -1086,7 +1545,7 @@ def generate_and_send(to_email: str,
 
     body_html = f"""
     <div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:640px;color:#111">
-    <p>Attached: LOV3 Weekly Comp Discipline Report v2.0 for the week of <b>{label}</b>.</p>
+    <p>Attached: LOV3 Weekly Comp Discipline Report v3.0 for the week of <b>{label}</b>.</p>
     <p><b>Verdict:</b> {cur.grade()[0]} · Blended {cur.total_pct:.2f}% (target &lt;4%)</p>
     <p><b>Money at risk:</b> {_money(sum(m.foregone_revenue for m in cur.tier_2_movements.values()))} Tier 2 foregone
     · {len([f for f in lp_voids if f.is_cash])} cash voids · {sum(1 for c in cur.promoter_caps if c.is_over_cap)} cap breach(es)</p>
