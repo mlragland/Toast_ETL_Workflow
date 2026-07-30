@@ -220,17 +220,36 @@ class ReasonItemMismatch:
 
 @dataclass
 class ManagerBehaviorMetrics:
-    """The 6 bad-behavior detectors per named manager (COO synthesis)."""
+    """The 6 bad-behavior detectors per named manager (COO synthesis).
+
+    Adds shift-normalized KPIs from Sprint B (Labor API integration): shifts_worked
+    is measured from LaborTimeEntries where available, with fallback to
+    CheckDetails.server-distinct-processing_date. Managers who don't clock in
+    via Toast (Tiffany, Tony historically) use the fallback.
+    """
     name: str
     self_approval_count: int = 0
     self_approval_dollars: float = 0.0
-    round_dollar_ratio: float = 0.0  # % of comps ≥$100 ending in .00
+    round_dollar_ratio: float = 0.0
     round_dollar_events: int = 0
-    late_shift_ratio: float = 0.0  # % of comps rung 11pm-2:30am
+    late_shift_ratio: float = 0.0
     late_shift_dollars: float = 0.0
-    reason_specificity_pct: float = 0.0  # % using non-generic reason codes
-    retail_vs_owner_mix_pct: float = 0.0  # % retail SKU when OWNER exists
-    trend_vs_4wk_median_pct: float = 0.0  # this week vs own 4wk median
+    reason_specificity_pct: float = 0.0
+    retail_vs_owner_mix_pct: float = 0.0
+    trend_vs_4wk_median_pct: float = 0.0
+    # Sprint B — shift normalization
+    shifts_worked: int = 0
+    shifts_source: str = "labor"  # "labor" | "checks_fallback" | "none"
+    discretionary_comp: float = 0.0  # snapshot of scorecard $ for the ratio
+    comp_count: int = 0
+
+    @property
+    def discretionary_per_shift(self) -> float:
+        return self.discretionary_comp / self.shifts_worked if self.shifts_worked else 0.0
+
+    @property
+    def comps_per_shift(self) -> float:
+        return self.comp_count / self.shifts_worked if self.shifts_worked else 0.0
 
 
 # ── LP audit data fetch (self-approval + post-close voids) ───────────
@@ -417,6 +436,50 @@ def fetch_reason_item_mismatches(bq: bigquery.Client,
     return out
 
 
+def _fetch_shifts_worked(bq: bigquery.Client, mgr_name: str,
+                          start: str, end: str) -> Tuple[int, str]:
+    """Return (shifts_worked, source). Try LaborTimeEntries first, then CheckDetails.
+
+    Some LOV3 managers (Tiffany, Tony) rarely clock in via Toast even though they
+    work — so fall back to counting distinct processing_date where their name
+    appears as the CheckDetails.server (means they were on the floor).
+    """
+    # 1. LaborTimeEntries
+    q = f"""
+    SELECT COUNT(DISTINCT processing_date) AS shifts
+    FROM `{PROJECT_ID}.{DATASET_ID}.LaborTimeEntries_raw`
+    WHERE processing_date BETWEEN @start AND @end
+      AND LOWER(employee_name) = LOWER(@name)
+      AND regular_hours >= 1
+    """
+    job = bq.query(q, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("start", "DATE", start),
+        bigquery.ScalarQueryParameter("end", "DATE", end),
+        bigquery.ScalarQueryParameter("name", "STRING", mgr_name),
+    ]))
+    for row in job.result():
+        s = int(row.shifts or 0)
+        if s > 0:
+            return s, "labor"
+
+    # 2. Fallback: CheckDetails distinct processing_date where mgr is server
+    q2 = f"""
+    SELECT COUNT(DISTINCT processing_date) AS shifts
+    FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
+    WHERE processing_date BETWEEN @start AND @end
+      AND server = @name
+    """
+    job2 = bq.query(q2, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("start", "DATE", start),
+        bigquery.ScalarQueryParameter("end", "DATE", end),
+        bigquery.ScalarQueryParameter("name", "STRING", mgr_name),
+    ]))
+    for row in job2.result():
+        s = int(row.shifts or 0)
+        return s, "checks_fallback" if s > 0 else "none"
+    return 0, "none"
+
+
 def fetch_manager_behavior(bq: bigquery.Client, cur: CompPeriod,
                             mgr_name: str) -> ManagerBehaviorMetrics:
     """Compute the 6 bad-behavior detectors for one manager (this week)."""
@@ -528,6 +591,16 @@ def fetch_manager_behavior(bq: bigquery.Client, cur: CompPeriod,
         if base > 0:
             m.trend_vs_4wk_median_pct = 100.0 * (total_dollars - base) / base
         break
+
+    # 8. Sprint B — shifts worked (Labor API with CheckDetails fallback)
+    m.shifts_worked, m.shifts_source = _fetch_shifts_worked(
+        bq, mgr_name, cur.start, cur.end,
+    )
+    # Snapshot the scorecard $ for the per-shift ratio
+    s = cur.named_scorecards.get(mgr_name)
+    if s:
+        m.discretionary_comp = s.discretionary_comp
+        m.comp_count = s.comp_count
 
     return m
 
@@ -754,7 +827,7 @@ def fetch_bottle_manager_audit(bq: bigquery.Client, start: str, end: str) -> BMA
 # ── Page builders ────────────────────────────────────────────────────
 
 
-def _footer(canv: canvas.Canvas, doc, version: str = "v5.0"):
+def _footer(canv: canvas.Canvas, doc, version: str = "v6.0"):
     canv.saveState()
     canv.setFont("Helvetica", 7)
     canv.setFillColor(BONE)
@@ -801,7 +874,7 @@ def build_cover(cur: CompPeriod) -> List:
         ["Managers", "Tiffany Loving · Anthony Winn · Dajah Bishop"],
         ["Bar Lead", "Ashley Baines"],
         ["Generated", datetime.now().strftime("%B %-d, %Y at %-I:%M %p Central")],
-        ["Document version", "v5.0 · Policy rev 2026-07-29"],
+        ["Document version", "v6.0 · Policy rev 2026-07-29"],
         ["Classification", "CONFIDENTIAL — For Leadership Only"],
     ]
     t = Table(dist_data, colWidths=[1.7 * inch, 4.5 * inch])
@@ -1208,9 +1281,15 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
     # ── Peer Benchmark table ──
     story.append(Spacer(1, 0.1 * inch))
     story.append(Paragraph("PEER BENCHMARKS", STYLE_H3))
+    # Compute peer median discretionary $/shift
+    per_shift_vals = [b.discretionary_per_shift
+                       for b in behaviors.values() if b.shifts_worked > 0]
+    peer_per_shift_median = (sorted(per_shift_vals)[len(per_shift_vals)//2]
+                              if per_shift_vals else 0.0)
     bench_rows = [
         ["Metric", "Individual Target", "Peer Median This Week"],
         ["Manager Discretionary $ per week", "≤ $500", _money(peer_disc_median)],
+        ["Manager Discretionary $ per shift", "≤ $100 / shift", _money(peer_per_shift_median)],
         ["Reason-code diversity", "≥ 3 of 4 buckets", f"{peer_diversity_median} / 4"],
         ["Recovery approvals per week", "target driven by kitchen quality", "—"],
         ["Owner comp button use", "audit-trail only, no cap", "—"],
@@ -1221,27 +1300,39 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
 
     # ── Individual manager KPIs ──
     story.append(Spacer(1, 0.12 * inch))
-    story.append(Paragraph("INDIVIDUAL SCORECARDS", STYLE_H3))
-    mgr_rows = [["Manager", "Comps", "Discret $", "Recovery $",
-                 "Owner Rung", "Diversity", "vs Peer Median"]]
+    story.append(Paragraph("INDIVIDUAL SCORECARDS (shift-normalized)", STYLE_H3))
+    mgr_rows = [["Manager", "Shifts", "Comps", "Discret $",
+                 "Discret $/Shift", "Diversity", "vs Peer Median"]]
     for name in MANAGERS:
         s = cur.named_scorecards.get(name)
+        b = behaviors.get(name)
         if not s:
             continue
-        # Delta vs peer median
         delta = s.discretionary_comp - peer_disc_median
         delta_str = f"+${delta:,.0f}" if delta > 0 else f"−${abs(delta):,.0f}"
+        shifts_str = str(b.shifts_worked) if b else "—"
+        if b and b.shifts_source == "checks_fallback":
+            shifts_str += "*"
+        per_shift = f"${b.discretionary_per_shift:,.0f}" if b and b.shifts_worked else "—"
         mgr_rows.append([
-            s.name, str(s.comp_count),
-            _money(s.discretionary_comp), _money(s.recovery_comp),
-            _money(s.owner_comp_rung),
+            s.name, shifts_str, str(s.comp_count),
+            _money(s.discretionary_comp),
+            per_shift,
             f"{s.reason_code_diversity} / 4",
             delta_str,
         ])
-    mt = Table(mgr_rows, colWidths=[1.5 * inch, 0.7 * inch, 1.0 * inch, 1.0 * inch,
-                                     1.0 * inch, 0.9 * inch, 1.3 * inch])
+    mt = Table(mgr_rows, colWidths=[1.5 * inch, 0.7 * inch, 0.7 * inch, 1.0 * inch,
+                                     1.2 * inch, 0.9 * inch, 1.2 * inch])
     mt.setStyle(TABLE_STYLE_STANDARD)
     story.append(mt)
+    # Footnote for fallback source
+    if any(b and b.shifts_source == "checks_fallback" for b in behaviors.values()):
+        story.append(Paragraph(
+            "<i>*Shifts sourced from CheckDetails (server activity) — manager "
+            "did not clock in via Toast Labor. Actual shift count may be higher "
+            "if they worked without opening tabs (cash register only).</i>",
+            STYLE_SMALL,
+        ))
 
     # ── Bad-Behavior Detectors (COO Sprint A) ──
     story.append(Spacer(1, 0.12 * inch))
@@ -2275,7 +2366,7 @@ def generate_and_send(to_email: str,
 
     body_html = f"""
     <div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:640px;color:#111">
-    <p>Attached: LOV3 Weekly Comp Discipline Report v5.0 for the week of <b>{label}</b>.</p>
+    <p>Attached: LOV3 Weekly Comp Discipline Report v6.0 for the week of <b>{label}</b>.</p>
     <p><b>Verdict:</b> {cur.grade()[0]} · Blended {cur.total_pct:.2f}% (target &lt;4%)</p>
     <p><b>Money at risk:</b> {_money(sum(m.foregone_revenue for m in cur.tier_2_movements.values()))} Tier 2 foregone
     · {len([f for f in lp_voids if f.is_cash])} cash voids · {sum(1 for c in cur.promoter_caps if c.is_over_cap)} cap breach(es)</p>
