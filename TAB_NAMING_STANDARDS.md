@@ -111,6 +111,30 @@ Historical:
 - `Maurice`, `Per Maurice`, `Maurice E9`, `Maurice's Table (Alex)`, `Maurce E12` (typo)
 - Classifier still catches these but standardize going forward
 
+### 3.4 OWNER SKU Usage — What OWNER-Prefixed Items Mean
+
+**OWNER-prefixed SKUs (`OWNER MOET ROSE`, `OWNER DON REPO`, `OWNER ACE`, etc.)
+are RESERVED for:**
+- Bottles consumed by the owners themselves (Maurice, Eddie, Derwin) on their own tabs
+- Bottles allocated at the owners' discretion (their guests, hosted VIPs, etc.)
+
+**OWNER SKUs are NOT the vehicle for birthday-package delivery.** Bottle Manager
+ringing OWNER champagne on non-birthday tabs is owner personal / discretionary
+activity — NOT evidence a birthday party received their package.
+
+The reconciler treats an OWNER-SKU ring as birthday delivery ONLY when the tab
+name matches a birthday-tab pattern (`Bday-{D}-{Name}` per §1.1 or legacy
+`Fri Bday` / `Sat Bday` etc.).
+
+### 3.5 Planned: Dedicated Birthday Champagne SKU (roadmap)
+
+Future migration: LOV3 will add a dedicated **"Birthday Champagne"** button/SKU
+family so birthday deliveries become distinguishable at the SKU level, not just
+by tab name. Once live:
+- Ring "Birthday Champagne Bellaire" (or the day's equivalent) for the package
+- OWNER SKUs go back to purely owner-personal / owner-discretionary use
+- Reconciler switches from tab-name detection to SKU detection (higher confidence)
+
 ---
 
 ## 4. VIP Tabs

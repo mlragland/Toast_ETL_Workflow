@@ -9,6 +9,20 @@ Only reservations with "Birthday Dinner Package" (or equivalent) in the SR
 merely birthday-tagged in `tags_json` (or mentioned in loose free-text) are
 NOT bound by any comp rules.
 
+**OWNER SKU RULE (locked 2026-07-30):**
+OWNER-prefixed SKUs represent bottles consumed by the owners themselves OR
+allocated at their discretion — NOT birthday-package delivery. In particular,
+Bottle Manager ringing OWNER champagne on non-birthday tabs is owner-personal
+or owner-discretionary activity, NOT evidence of birthday delivery.
+
+The only OWNER champagne rings that count as birthday delivery are those
+that appear on tabs matching the birthday-tab pattern
+(`Bday-{D}-{Name}` or legacy `Fri Bday` / `Sat Bday` etc.).
+
+Future: LOV3 will add a dedicated "Birthday Champagne" button/SKU family
+so birthday deliveries are distinguishable from owner discretion at the
+SKU level. Until then, tab-name is the sole disambiguator.
+
 Bridge mechanism: SevenRooms_Reservations_raw.check_numbers is a comma-separated
 list of Toast CheckDetails.check_number values on the same date. Join gives us
 the guest's actual spend, discount, and item mix.
@@ -527,18 +541,18 @@ class BirthdayReconciliation:
                 result.reservations.append(res)
                 continue
 
-            # ── STEP 3 — Off-book delivery (bday-tab OR Bottle Manager
-            # OWNER-cost rings on same day, matching expected item) ───
+            # ── STEP 3 — Off-book delivery: birthday-labeled tabs only.
+            # Bottle Manager OWNER-SKU rings on non-birthday tabs are owner
+            # personal / owner-discretionary activity, NOT birthday delivery
+            # (locked 2026-07-30). Only tabs matching the birthday pattern
+            # count as candidate deliveries here.
             off_book_pool = [
                 r for r in all_rings
                 if r.processing_date == res.date
                 and expected_kw in r.menu_item.lower()
                 and (r.is_fully_comped or r.is_owner_cost_basis)
                 and (r.processing_date, r.check_number) not in matched_check_keys
-                and (
-                    self._tab_is_birthday(r.tab_name)
-                    or (r.server == "Bottle Manager" and is_owner_prefixed(r.menu_item))
-                )
+                and self._tab_is_birthday(r.tab_name)
             ]
             if off_book_pool and res.hit_minimum:
                 # Speculative match — flag it but claim delivery
@@ -574,13 +588,32 @@ class BirthdayReconciliation:
             if r.is_owner_cost_basis and self._tab_is_birthday(r.tab_name)
         ]
 
-        # Ghost birthdays: fully-comped champagne rings whose (date, check_number)
-        # isn't matched to any SR reservation
+        # Ghost birthdays: fully-comped champagne rings that:
+        #   - aren't attached to any SR reservation via check_number match
+        #   - AREN'T owner-personal / owner-discretionary (Maurice/Eddie/Derwin tabs)
+        #   - AREN'T host-stand Wycliffe welcome pours
+        #   - AREN'T tastings (distributor/owner tasting)
+        # Only legitimate "unaccounted-for" birthday champagne comps remain.
+        def _is_owner_personal_or_marketing(ring: ChampagneRing) -> bool:
+            t = (ring.tab_name or "").lower()
+            # Owner personal
+            for kw in ("maurice", "eddie", "derwin", "per maurice"):
+                if kw in t:
+                    return True
+            # Host stand / Wycliffe welcome / DNL
+            if t in ("door", "dnl") or "host stand" in t or "wycliffe" in t:
+                return True
+            # Owner tasting / distributor tasting
+            if "tasting" in t or "distributor" in t:
+                return True
+            return False
+
         result.ghost_birthdays = [
             r for r in all_rings
             if r.is_fully_comped
             and r.check_number is not None
             and (r.processing_date, r.check_number) not in matched_check_keys
+            and not _is_owner_personal_or_marketing(r)
         ]
         return result
 
