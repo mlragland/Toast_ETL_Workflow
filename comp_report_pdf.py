@@ -159,6 +159,47 @@ def _pill(text: str, color: colors.Color, size: int = 8) -> Paragraph:
     )
 
 
+# ── Sprint A dataclasses (bad-behavior + LP-B collusion signals) ─────
+
+
+@dataclass
+class ApproverServerPair:
+    """Repeat approver→server void pair (LP-B structural collusion signal)."""
+    approver: str
+    server: str
+    void_user: str
+    events: int
+    total_dollars: float
+    void_user_is_service_account: bool
+
+
+@dataclass
+class ReasonItemMismatch:
+    """Reason code doesn't match the item comped (Spillage on bottle etc.)."""
+    processing_date: str
+    server: str
+    tab_name: str
+    menu_item: str
+    sales_category: str
+    reason: str
+    amount: float
+
+
+@dataclass
+class ManagerBehaviorMetrics:
+    """The 6 bad-behavior detectors per named manager (COO synthesis)."""
+    name: str
+    self_approval_count: int = 0
+    self_approval_dollars: float = 0.0
+    round_dollar_ratio: float = 0.0  # % of comps ≥$100 ending in .00
+    round_dollar_events: int = 0
+    late_shift_ratio: float = 0.0  # % of comps rung 11pm-2:30am
+    late_shift_dollars: float = 0.0
+    reason_specificity_pct: float = 0.0  # % using non-generic reason codes
+    retail_vs_owner_mix_pct: float = 0.0  # % retail SKU when OWNER exists
+    trend_vs_4wk_median_pct: float = 0.0  # this week vs own 4wk median
+
+
 # ── LP audit data fetch (self-approval + post-close voids) ───────────
 
 
@@ -232,6 +273,230 @@ def fetch_lp_voids(bq: bigquery.Client, start: str, end: str) -> List[LPVoidReco
             time_to_void_secs=secs,
         ))
     return out
+
+
+# ── Sprint A fetch helpers ───────────────────────────────────────────
+
+
+import re
+_UUID_EMAIL_RE = re.compile(
+    r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}",
+    re.IGNORECASE,
+)
+
+
+def _is_service_account(void_user: str) -> bool:
+    """UUID email or example.com = synthetic void_user (P0 flag)."""
+    if not void_user:
+        return False
+    vu = void_user.lower().strip()
+    if "example.com" in vu or "@test" in vu:
+        return True
+    if _UUID_EMAIL_RE.match(vu):
+        return True
+    return False
+
+
+def fetch_approver_pairs(bq: bigquery.Client, ref_date: str,
+                          lookback_days: int = 90) -> List[ApproverServerPair]:
+    """Trailing-N-day repeat approver→server void pairs (LP-B collusion)."""
+    q = f"""
+    SELECT
+      COALESCE(void_approver, '') AS approver,
+      COALESCE(server, '') AS server,
+      COALESCE(void_user, '') AS void_user,
+      COUNT(*) AS events,
+      ROUND(SUM(SAFE_CAST(amount AS FLOAT64)), 0) AS dollars
+    FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
+    WHERE processing_date BETWEEN
+        DATE_SUB(@ref_date, INTERVAL {lookback_days} DAY) AND @ref_date
+      AND void_user IS NOT NULL AND void_user != ''
+    GROUP BY approver, server, void_user
+    HAVING events >= 3 OR dollars >= 500
+    ORDER BY dollars DESC
+    LIMIT 20
+    """
+    job = bq.query(q, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("ref_date", "DATE", ref_date),
+    ]))
+    out: List[ApproverServerPair] = []
+    for row in job.result():
+        vu = row.void_user or ""
+        out.append(ApproverServerPair(
+            approver=row.approver or "—",
+            server=row.server or "—",
+            void_user=vu,
+            events=int(row.events),
+            total_dollars=float(row.dollars or 0.0),
+            void_user_is_service_account=_is_service_account(vu),
+        ))
+    return out
+
+
+def fetch_reason_item_mismatches(bq: bigquery.Client,
+                                   start: str, end: str
+                                   ) -> List[ReasonItemMismatch]:
+    """Reason codes incompatible with the item (Spillage on a bottled item, etc.)."""
+    q = f"""
+    SELECT
+      cd.processing_date,
+      cd.server,
+      cd.reason_of_discount,
+      SAFE_CAST(cd.discount AS FLOAT64) AS discount,
+      isd.menu_item,
+      isd.sales_category,
+      isd.tab_name
+    FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw` cd
+    JOIN `{PROJECT_ID}.{DATASET_ID}.ItemSelectionDetails_raw` isd
+      ON CAST(cd.check_id AS STRING) = CAST(isd.check_id AS STRING)
+      AND cd.processing_date = isd.processing_date
+    WHERE cd.processing_date BETWEEN @start AND @end
+      AND SAFE_CAST(cd.discount AS FLOAT64) >= 75
+      AND (LOWER(cd.reason_of_discount) LIKE '%spillage%'
+           OR LOWER(cd.reason_of_discount) LIKE '%food quality%'
+           OR LOWER(cd.reason_of_discount) LIKE '%didn%t like%'
+           OR LOWER(cd.reason_of_discount) LIKE '%remake%')
+      AND (
+        UPPER(isd.menu_item) LIKE 'BTL %'
+        OR UPPER(isd.menu_item) LIKE 'OWNER %'
+        OR UPPER(isd.menu_item) LIKE '$%'
+        OR (LOWER(isd.sales_category) LIKE '%liquor%'
+            AND SAFE_CAST(isd.gross_price AS FLOAT64) >= 100)
+      )
+    ORDER BY SAFE_CAST(cd.discount AS FLOAT64) DESC
+    LIMIT 20
+    """
+    job = bq.query(q, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("start", "DATE", start),
+        bigquery.ScalarQueryParameter("end", "DATE", end),
+    ]))
+    out: List[ReasonItemMismatch] = []
+    for row in job.result():
+        out.append(ReasonItemMismatch(
+            processing_date=str(row.processing_date),
+            server=row.server or "—",
+            tab_name=row.tab_name or "",
+            menu_item=row.menu_item or "",
+            sales_category=row.sales_category or "",
+            reason=row.reason_of_discount or "",
+            amount=float(row.discount or 0.0),
+        ))
+    return out
+
+
+def fetch_manager_behavior(bq: bigquery.Client, cur: CompPeriod,
+                            mgr_name: str) -> ManagerBehaviorMetrics:
+    """Compute the 6 bad-behavior detectors for one manager (this week)."""
+    m = ManagerBehaviorMetrics(name=mgr_name)
+
+    # Discretionary-only, this manager, this week
+    mgr_comps = [it for it in cur.item_log
+                 if it.server == mgr_name and it.discount > 0]
+    if not mgr_comps:
+        return m
+
+    total_events = len(mgr_comps)
+    total_dollars = sum(it.discount for it in mgr_comps)
+
+    # 1. Round-$ ratio
+    round_events = [it for it in mgr_comps
+                    if it.discount >= 100 and abs(it.discount - round(it.discount)) < 0.001
+                    and int(round(it.discount)) % 100 == 0]
+    m.round_dollar_events = len(round_events)
+    m.round_dollar_ratio = 100.0 * len(round_events) / max(total_events, 1)
+
+    # 2. Late-shift (opened between 11pm and 2:30am) — best-effort via reason string
+    # Item log doesn't carry opened_time; approximate via processing_date + time hint later.
+    # For now, use whether any comp on this manager falls in the "late" bucket
+    # from CheckDetails. Query below.
+    # (implemented via _fetch_late_shift_totals below in main flow)
+
+    # 3. Reason-code specificity — % NOT using generic "Manager Comp - Check/Item (100.00%)"
+    def _is_generic(reason: str) -> bool:
+        if not reason:
+            return True
+        r = reason.lower().replace("(100.00%)", "").replace("(100%)", "").strip(", ").strip()
+        return r in ("manager comp - check", "manager comp - item",
+                     "manager comp - check ,",
+                     "manager comp - item, manager comp - item")
+    specific_events = [it for it in mgr_comps if it.reason and not _is_generic(it.reason)]
+    m.reason_specificity_pct = 100.0 * len(specific_events) / max(total_events, 1)
+
+    # 4. Retail-vs-OWNER-SKU comp mix (% of $ that used retail SKU when an OWNER equivalent exists)
+    from comp_analytics import OWNER_SKU_TO_RETAIL
+    retail_names = set(OWNER_SKU_TO_RETAIL.values())
+    retail_when_owner_exists = sum(it.discount for it in mgr_comps
+                                    if it.menu_item in retail_names)
+    m.retail_vs_owner_mix_pct = 100.0 * retail_when_owner_exists / max(total_dollars, 1)
+
+    # 5. Self-approval — best-effort via PaymentDetails; query per-manager
+    q = f"""
+    SELECT
+      COUNT(*) AS events,
+      ROUND(SUM(SAFE_CAST(amount AS FLOAT64)), 0) AS dollars
+    FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
+    WHERE processing_date BETWEEN @start AND @end
+      AND void_user IS NOT NULL AND void_user != ''
+      AND (LOWER(server) = LOWER(@name) OR LOWER(server) LIKE CONCAT('%', LOWER(@first), '%'))
+      AND (LOWER(void_user) = LOWER(@name) OR LOWER(void_user) LIKE CONCAT('%', LOWER(@first), '%'))
+    """
+    first = mgr_name.split()[0] if mgr_name else ""
+    job = bq.query(q, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("start", "DATE", cur.start),
+        bigquery.ScalarQueryParameter("end", "DATE", cur.end),
+        bigquery.ScalarQueryParameter("name", "STRING", mgr_name),
+        bigquery.ScalarQueryParameter("first", "STRING", first),
+    ]))
+    for row in job.result():
+        m.self_approval_count = int(row.events or 0)
+        m.self_approval_dollars = float(row.dollars or 0.0)
+        break
+
+    # 6. Late-shift ratio (11pm-2:30am) via CheckDetails opened_time
+    q2 = f"""
+    SELECT
+      ROUND(SUM(CASE WHEN
+        (SAFE.PARSE_TIME('%I:%M %p', opened_time) >= TIME '23:00:00'
+         OR SAFE.PARSE_TIME('%I:%M %p', opened_time) < TIME '02:30:00')
+        THEN SAFE_CAST(discount AS FLOAT64) ELSE 0 END), 0) AS late_dollars,
+      ROUND(SUM(SAFE_CAST(discount AS FLOAT64)), 0) AS total_dollars
+    FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
+    WHERE processing_date BETWEEN @start AND @end
+      AND server = @name
+      AND SAFE_CAST(discount AS FLOAT64) > 0
+    """
+    job2 = bq.query(q2, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("start", "DATE", cur.start),
+        bigquery.ScalarQueryParameter("end", "DATE", cur.end),
+        bigquery.ScalarQueryParameter("name", "STRING", mgr_name),
+    ]))
+    for row in job2.result():
+        late = float(row.late_dollars or 0.0)
+        tot = float(row.total_dollars or 0.0)
+        m.late_shift_dollars = late
+        m.late_shift_ratio = 100.0 * late / max(tot, 1)
+        break
+
+    # 7. 4-week trend delta — this-week $ vs manager's own 4-wk rolling median
+    q3 = f"""
+    SELECT SUM(SAFE_CAST(discount AS FLOAT64)) / 4.0 AS avg_wk
+    FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
+    WHERE processing_date BETWEEN
+        DATE_SUB(@start, INTERVAL 28 DAY) AND DATE_SUB(@start, INTERVAL 1 DAY)
+      AND server = @name
+      AND SAFE_CAST(discount AS FLOAT64) > 0
+    """
+    job3 = bq.query(q3, job_config=bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("start", "DATE", cur.start),
+        bigquery.ScalarQueryParameter("name", "STRING", mgr_name),
+    ]))
+    for row in job3.result():
+        base = float(row.avg_wk or 0.0)
+        if base > 0:
+            m.trend_vs_4wk_median_pct = 100.0 * (total_dollars - base) / base
+        break
+
+    return m
 
 
 # ── Bottle Manager audit ─────────────────────────────────────────────
@@ -314,7 +579,7 @@ def fetch_bottle_manager_audit(bq: bigquery.Client, start: str, end: str) -> BMA
 # ── Page builders ────────────────────────────────────────────────────
 
 
-def _footer(canv: canvas.Canvas, doc, version: str = "v3.0"):
+def _footer(canv: canvas.Canvas, doc, version: str = "v4.0"):
     canv.saveState()
     canv.setFont("Helvetica", 7)
     canv.setFillColor(BONE)
@@ -361,7 +626,7 @@ def build_cover(cur: CompPeriod) -> List:
         ["Managers", "Tiffany Loving · Anthony Winn · Dajah Bishop"],
         ["Bar Lead", "Ashley Baines"],
         ["Generated", datetime.now().strftime("%B %-d, %Y at %-I:%M %p Central")],
-        ["Document version", "v3.0 · Policy rev 2026-07-29"],
+        ["Document version", "v4.0 · Policy rev 2026-07-29"],
         ["Classification", "CONFIDENTIAL — For Leadership Only"],
     ]
     t = Table(dist_data, colWidths=[1.7 * inch, 4.5 * inch])
@@ -506,87 +771,179 @@ def build_exec_summary(cur: CompPeriod, prev: CompPeriod, tier2_foregone: float,
     return story
 
 
-def build_lp_audit(lp_voids: List[LPVoidRecord]) -> List:
-    """Page 3 (or wherever) — Loss Prevention Audit."""
+def build_lp_audit(lp_voids: List[LPVoidRecord],
+                    approver_pairs: List[ApproverServerPair],
+                    reason_mismatches: List[ReasonItemMismatch]) -> List:
+    """Page 3 — Loss Prevention Audit. Split into LP-A skim vectors + LP-B collusion."""
     story = []
     story.append(Paragraph("Page 3 · Loss Prevention", STYLE_EYEBROW))
     story.append(Paragraph("Loss Prevention Audit", STYLE_H1))
     story.append(Paragraph(
-        "Post-payment voids with self-approval detection. Cash voids and "
-        "same-minute voids flagged red. Every void requires manager gate-keeping "
-        "at the time of payment — post-hoc approvals do not satisfy the control.",
+        "Split into <b>LP-A: Real-Time Skim Vectors</b> (this week) and "
+        "<b>LP-B: Structural Collusion</b> (trailing 90 days). Post-hoc "
+        "manager approvals do not satisfy the pre-void gate control. "
+        "Anonymous void_users (UUID / example.com emails) are P0.",
         STYLE_BODY,
     ))
 
-    # Filter to actionable rows
+    # ── Category tally ──
     same_minute = [f for f in lp_voids
                    if f.time_to_void_secs is not None and f.time_to_void_secs < 120]
     self_approved = [f for f in lp_voids if f.is_self_approved]
     cash_voids = [f for f in lp_voids if f.is_cash]
+    anon_voiders = [f for f in lp_voids if _is_service_account(f.void_user)]
 
-    story.append(Spacer(1, 0.1 * inch))
+    story.append(Spacer(1, 0.08 * inch))
     story.append(Paragraph("SUMMARY", STYLE_H3))
     sum_rows = [
         ["Category", "Count", "$ Amount", "Severity"],
-        ["Total post-payment voids", str(len(lp_voids)),
+        ["Total post-payment voids (this wk)", str(len(lp_voids)),
          _money(sum(f.amount for f in lp_voids)), "—"],
-        ["Cash voids (highest-risk pattern)", str(len(cash_voids)),
+        ["Cash voids", str(len(cash_voids)),
          _money(sum(f.amount for f in cash_voids)), "🔴 P0"],
         ["Self-approved voids", str(len(self_approved)),
          _money(sum(f.amount for f in self_approved)), "🔴 P0"],
         ["Same-minute voids (<120s)", str(len(same_minute)),
          _money(sum(f.amount for f in same_minute)), "🚨 URGENT"],
+        ["Anonymous void_users (service account)", str(len(anon_voiders)),
+         _money(sum(f.amount for f in anon_voiders)), "🚨 P0"],
+        ["Repeat approver-server pairs (90d)", str(len(approver_pairs)),
+         _money(sum(p.total_dollars for p in approver_pairs)), "🔴 P0"],
+        ["Reason-vs-item mismatches", str(len(reason_mismatches)),
+         _money(sum(r.amount for r in reason_mismatches)), "🚨 FRAUD"],
     ]
     st = Table(sum_rows, colWidths=[3.0 * inch, 0.8 * inch, 1.5 * inch, 1.5 * inch])
     st.setStyle(TABLE_STYLE_STANDARD)
-    if cash_voids or self_approved or same_minute:
-        st.setStyle(TableStyle([("TEXTCOLOR", (3, 2), (3, -1), RED)]))
+    st.setStyle(TableStyle([("TEXTCOLOR", (3, 2), (3, -1), RED),
+                             ("FONTNAME", (3, 2), (3, -1), "Helvetica-Bold")]))
     story.append(st)
 
-    # Urgent alert callout
-    if same_minute:
-        story.append(Spacer(1, 0.12 * inch))
-        story.append(Paragraph("URGENT — Same-Minute Cash Voids", STYLE_H3))
-        story.append(Paragraph(
-            f"<font color='#C97064'><b>Action required within 24 hours:</b></font> "
-            f"same-day cash-drawer count review + camera pull for the following voids. "
-            f"Same-minute voids on cash payments are hospitality's #1 skim vector.",
-            STYLE_BODY,
-        ))
-        alert_rows = [["Date", "Server", "Amount", "Time-to-Void"]]
-        for f in same_minute[:5]:
-            alert_rows.append([
-                f.processing_date, f.server, _money(f.amount),
-                f"{f.time_to_void_secs}s"
-            ])
-        at = Table(alert_rows, colWidths=[1.2 * inch, 2.5 * inch, 1.5 * inch, 1.6 * inch])
-        at.setStyle(TABLE_STYLE_STANDARD)
-        at.setStyle(TableStyle([
-            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#fbe4e0")),
-            ("TEXTCOLOR", (2, 1), (2, -1), RED),
-            ("FONTNAME", (2, 1), (2, -1), "Helvetica-Bold"),
-        ]))
-        story.append(at)
-
-    # Full void detail
+    # ── LP-A · Top 5 largest voids sorted by $ (not time filter) ──
     if lp_voids:
         story.append(Spacer(1, 0.12 * inch))
-        story.append(Paragraph("VOID DETAIL", STYLE_H3))
-        void_rows = [["Date", "Server", "Amount", "Tender", "Void By", "Approver", "Self?"]]
-        for f in lp_voids[:15]:
-            void_rows.append([
-                f.processing_date,
-                f.server[:18],
-                _money(f.amount),
-                f.payment_type[:10],
-                f.void_user[:16],
-                f.void_approver[:16] if f.void_approver else "—",
-                "🔴" if f.is_self_approved else "—",
+        story.append(Paragraph(
+            "LP-A · TOP 5 LARGEST VOIDS THIS WEEK (sorted by $)",
+            STYLE_H3,
+        ))
+        top5 = sorted(lp_voids, key=lambda f: -f.amount)[:5]
+        top_rows = [["Date", "Server", "Amount", "Tender", "Void By", "Approver",
+                     "Time-to-Void", "Flags"]]
+        for f in top5:
+            flags = []
+            if f.is_cash: flags.append("CASH")
+            if f.is_self_approved: flags.append("SELF")
+            if f.time_to_void_secs is not None and f.time_to_void_secs < 120: flags.append("<2m")
+            if _is_service_account(f.void_user): flags.append("ANON")
+            ttv = f"{f.time_to_void_secs}s" if f.time_to_void_secs is not None else "—"
+            top_rows.append([
+                f.processing_date, f.server[:14], _money(f.amount),
+                f.payment_type[:8], f.void_user[:14],
+                f.void_approver[:14] if f.void_approver else "—",
+                ttv, " · ".join(flags),
             ])
-        vt = Table(void_rows, colWidths=[0.85 * inch, 1.4 * inch, 0.9 * inch,
-                                          0.8 * inch, 1.2 * inch, 1.2 * inch, 0.55 * inch])
-        vt.setStyle(TABLE_STYLE_STANDARD)
-        story.append(vt)
+        tt = Table(top_rows, colWidths=[0.75 * inch, 1.15 * inch, 0.75 * inch,
+                                          0.65 * inch, 1.05 * inch, 1.0 * inch,
+                                          0.75 * inch, 1.15 * inch])
+        tt.setStyle(TABLE_STYLE_STANDARD)
+        tt.setStyle(TableStyle([("TEXTCOLOR", (2, 1), (2, -1), RED),
+                                 ("FONTNAME", (2, 1), (2, -1), "Helvetica-Bold")]))
+        story.append(tt)
+
+    # ── LP-A · Reason-vs-item mismatches (Spillage on bottle = fraud pattern) ──
+    if reason_mismatches:
+        story.append(Spacer(1, 0.12 * inch))
+        story.append(Paragraph(
+            "LP-A · REASON-CODE ABUSE — Spillage / Food Quality on Bottled Items",
+            STYLE_H3,
+        ))
+        story.append(Paragraph(
+            "<font color='#C97064'><b>You cannot spill a sealed bottle.</b></font> "
+            "These rings used 'Spillage' or similar reasons on bottled liquor or "
+            "OWNER SKUs. Classic 'steal the bottle, ring the comp' pattern — "
+            "requires camera pull + inventory tie-out.",
+            STYLE_BODY,
+        ))
+        rm_rows = [["Date", "Server", "Item", "Reason", "Amount"]]
+        for r in reason_mismatches[:10]:
+            rm_rows.append([
+                r.processing_date, r.server[:14], r.menu_item[:22],
+                r.reason[:24], _money(r.amount),
+            ])
+        rmt = Table(rm_rows, colWidths=[0.9 * inch, 1.2 * inch, 2.0 * inch,
+                                          2.1 * inch, 1.0 * inch])
+        rmt.setStyle(TABLE_STYLE_STANDARD)
+        rmt.setStyle(TableStyle([("TEXTCOLOR", (4, 1), (4, -1), RED)]))
+        story.append(rmt)
+
+    story.append(PageBreak())
+
+    # ── LP-B · Structural Collusion (trailing 90 days) ──
+    story.append(Paragraph("Page 4 · Loss Prevention (continued)", STYLE_EYEBROW))
+    story.append(Paragraph("LP-B · Structural Collusion (90-Day Lookback)", STYLE_H1))
+    story.append(Paragraph(
+        "Repeat approver→server void pairs across the trailing 90 days. "
+        "A pattern of one manager always approving the same server's voids is "
+        "the industry #1 collusion signal. Service-account void_users (UUID or "
+        "example.com) are unauthorized voiders and require immediate POS config "
+        "review.",
+        STYLE_BODY,
+    ))
+
+    if approver_pairs:
+        story.append(Spacer(1, 0.1 * inch))
+        story.append(Paragraph("APPROVER → SERVER CONCENTRATION MATRIX", STYLE_H3))
+        ap_rows = [["Approver (Manager)", "Server", "Void User", "Events", "$", "Anon?"]]
+        for p in approver_pairs[:12]:
+            ap_rows.append([
+                p.approver[:20], p.server[:18], p.void_user[:22],
+                str(p.events), _money(p.total_dollars),
+                "🚨 YES" if p.void_user_is_service_account else "—",
+            ])
+        apt = Table(ap_rows, colWidths=[1.7 * inch, 1.5 * inch, 1.8 * inch,
+                                          0.6 * inch, 0.8 * inch, 0.8 * inch])
+        apt.setStyle(TABLE_STYLE_STANDARD)
+        # Red highlight for service-account rows
+        for i, p in enumerate(approver_pairs[:12], 1):
+            if p.void_user_is_service_account:
+                apt.setStyle(TableStyle([
+                    ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#fbe4e0")),
+                    ("FONTNAME", (5, i), (5, i), "Helvetica-Bold"),
+                    ("TEXTCOLOR", (5, i), (5, i), RED),
+                ]))
+        story.append(apt)
+
+        story.append(Spacer(1, 0.1 * inch))
+        top_pair = approver_pairs[0] if approver_pairs else None
+        if top_pair:
+            story.append(Paragraph(
+                f"<b>Top pair:</b> {top_pair.approver} → {top_pair.server} "
+                f"= {top_pair.events} events / {_money(top_pair.total_dollars)} in 90 days. "
+                f"Review whether these voids reflect legitimate manager gate-keeping "
+                f"or a rubber-stamp pattern. Camera pull + shift-schedule cross-reference "
+                f"recommended for pairs ≥ 5 events.",
+                STYLE_BODY,
+            ))
+    else:
+        story.append(Paragraph("No repeat pairs detected in 90d — clean.", STYLE_BODY))
+
+    # Anonymous voider callout
+    anon_pairs = [p for p in approver_pairs if p.void_user_is_service_account]
+    if anon_pairs:
+        story.append(Spacer(1, 0.12 * inch))
+        story.append(Paragraph(
+            "🚨 ANONYMOUS VOIDER — POS Configuration Emergency",
+            STYLE_H3,
+        ))
+        anon_total = sum(p.total_dollars for p in anon_pairs)
+        story.append(Paragraph(
+            f"<font color='#C97064'><b>{len(anon_pairs)} approver pair(s) involve "
+            f"a service-account void_user ({_money(anon_total)} in 90 days).</b></font> "
+            f"UUID / example.com email addresses in Toast void_user field indicate "
+            f"either a shared login credential or a POS misconfiguration. Neither is "
+            f"acceptable. Coordinate with Toast rep within 48 hours to identify the "
+            f"human behind these voids and enable proper per-user login.",
+            STYLE_BODY,
+        ))
 
     story.append(PageBreak())
     return story
@@ -638,7 +995,8 @@ def build_bottle_manager_ledger(bm_audit: BMAudit, cur: CompPeriod) -> List:
     return story
 
 
-def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod) -> List:
+def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
+                              behaviors: Dict[str, ManagerBehaviorMetrics]) -> List:
     """Page 5 — Manager Performance (Tiffany · Tony · Daja) with peer benchmarks."""
     story = []
     story.append(Paragraph("Page 5 · Manager Performance", STYLE_EYEBROW))
@@ -698,6 +1056,67 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod) -> List:
                                      1.0 * inch, 0.9 * inch, 1.3 * inch])
     mt.setStyle(TABLE_STYLE_STANDARD)
     story.append(mt)
+
+    # ── Bad-Behavior Detectors (COO Sprint A) ──
+    story.append(Spacer(1, 0.12 * inch))
+    story.append(Paragraph(
+        "BAD-BEHAVIOR DETECTORS (COO diagnostics)",
+        STYLE_H3,
+    ))
+    story.append(Paragraph(
+        "Six signals designed to expose bad manager practices before they scale "
+        "to VIC3. Any 🔴 flag is a training conversation this week.",
+        STYLE_SMALL,
+    ))
+    story.append(Spacer(1, 0.05 * inch))
+    bhv_rows = [["Manager", "Self-Appr", "Round-$", "Late-Shift %",
+                  "Rsn-Code Spec.", "Retail vs OWNR", "vs 4wk Med."]]
+    for name in MANAGERS:
+        b = behaviors.get(name)
+        if not b:
+            bhv_rows.append([name, "—", "—", "—", "—", "—", "—"])
+            continue
+        # Format each cell with red flag if concerning
+        sa_str = (f"{b.self_approval_count} ({_money(b.self_approval_dollars)})"
+                  if b.self_approval_count > 0 else "0")
+        round_str = (f"{b.round_dollar_events} · {b.round_dollar_ratio:.0f}%"
+                     if b.round_dollar_events > 0 else "0")
+        late_str = (f"{b.late_shift_ratio:.0f}% ({_money(b.late_shift_dollars)})"
+                    if b.late_shift_ratio > 0 else "0%")
+        spec_str = f"{b.reason_specificity_pct:.0f}%"
+        retail_str = f"{b.retail_vs_owner_mix_pct:.0f}%"
+        trend_str = (f"{b.trend_vs_4wk_median_pct:+.0f}%"
+                     if abs(b.trend_vs_4wk_median_pct) > 1 else "flat")
+        bhv_rows.append([name[:16], sa_str, round_str, late_str,
+                          spec_str, retail_str, trend_str])
+    bt = Table(bhv_rows, colWidths=[1.4 * inch, 1.1 * inch, 0.85 * inch, 1.1 * inch,
+                                      1.0 * inch, 0.85 * inch, 1.0 * inch])
+    bt.setStyle(TABLE_STYLE_STANDARD)
+    # Red highlight for concerning cells
+    for i, name in enumerate(MANAGERS, 1):
+        b = behaviors.get(name)
+        if not b:
+            continue
+        if b.self_approval_count > 0:
+            bt.setStyle(TableStyle([("TEXTCOLOR", (1, i), (1, i), RED),
+                                     ("FONTNAME", (1, i), (1, i), "Helvetica-Bold")]))
+        if b.round_dollar_ratio > 30:
+            bt.setStyle(TableStyle([("TEXTCOLOR", (2, i), (2, i), RED)]))
+        if b.late_shift_ratio > 60:
+            bt.setStyle(TableStyle([("TEXTCOLOR", (3, i), (3, i), RED)]))
+        if b.reason_specificity_pct < 30:
+            bt.setStyle(TableStyle([("TEXTCOLOR", (4, i), (4, i), RED)]))
+        if b.trend_vs_4wk_median_pct > 50:
+            bt.setStyle(TableStyle([("TEXTCOLOR", (6, i), (6, i), RED)]))
+    story.append(bt)
+    story.append(Paragraph(
+        "<i>Legend:</i> Self-Appr = void_user matches server. Round-$ = comps ≥$100 "
+        "ending in .00 (goodwill guess pattern). Late-Shift % = $ rung between "
+        "11pm-2:30am (end-of-shift dump). Rsn-Code Spec. = % using non-generic "
+        "reasons. Retail vs OWNR = % using retail SKU when OWNER equivalent exists. "
+        "vs 4wk Med. = this week vs manager's 4-week rolling average.",
+        STYLE_SMALL,
+    ))
 
     # ── Manager assignments ──
     story.append(Spacer(1, 0.12 * inch))
@@ -1456,7 +1875,10 @@ def build_appendix(cur: CompPeriod, recon: BirthdayReconciliationResult) -> List
 def build_pdf(cur: CompPeriod, prev: CompPeriod,
               recon: BirthdayReconciliationResult,
               lp_voids: List[LPVoidRecord],
-              bm_audit: BMAudit) -> bytes:
+              bm_audit: BMAudit,
+              approver_pairs: List[ApproverServerPair],
+              reason_mismatches: List[ReasonItemMismatch],
+              behaviors: Dict[str, ManagerBehaviorMetrics]) -> bytes:
     buf = io.BytesIO()
     doc = BaseDocTemplate(
         buf, pagesize=LETTER,
@@ -1473,9 +1895,9 @@ def build_pdf(cur: CompPeriod, prev: CompPeriod,
     story += build_cover(cur)
     tier2_foregone = sum(m.foregone_revenue for m in cur.tier_2_movements.values())
     story += build_exec_summary(cur, prev, tier2_foregone, lp_voids)
-    story += build_lp_audit(lp_voids)
+    story += build_lp_audit(lp_voids, approver_pairs, reason_mismatches)
     story += build_bottle_manager_ledger(bm_audit, cur)
-    story += build_manager_scorecard(cur, prev)
+    story += build_manager_scorecard(cur, prev, behaviors)
     story += build_bar_lead_scorecard(cur, prev, recon)
     story += build_birthday_page(recon)
     story += build_best_practices(cur, recon)
@@ -1539,13 +1961,18 @@ def generate_and_send(to_email: str,
     recon = BirthdayReconciliation(analytics.bq).reconcile(s, e)
     lp_voids = fetch_lp_voids(analytics.bq, s, e)
     bm_audit = fetch_bottle_manager_audit(analytics.bq, s, e)
+    approver_pairs = fetch_approver_pairs(analytics.bq, e, lookback_days=90)
+    reason_mismatches = fetch_reason_item_mismatches(analytics.bq, s, e)
+    behaviors = {name: fetch_manager_behavior(analytics.bq, cur, name)
+                 for name in MANAGERS}
 
-    pdf = build_pdf(cur, prev, recon, lp_voids, bm_audit)
+    pdf = build_pdf(cur, prev, recon, lp_voids, bm_audit,
+                    approver_pairs, reason_mismatches, behaviors)
     filename = f"lov3_comp_report_v2_{s}_to_{e}.pdf"
 
     body_html = f"""
     <div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:640px;color:#111">
-    <p>Attached: LOV3 Weekly Comp Discipline Report v3.0 for the week of <b>{label}</b>.</p>
+    <p>Attached: LOV3 Weekly Comp Discipline Report v4.0 for the week of <b>{label}</b>.</p>
     <p><b>Verdict:</b> {cur.grade()[0]} · Blended {cur.total_pct:.2f}% (target &lt;4%)</p>
     <p><b>Money at risk:</b> {_money(sum(m.foregone_revenue for m in cur.tier_2_movements.values()))} Tier 2 foregone
     · {len([f for f in lp_voids if f.is_cash])} cash voids · {sum(1 for c in cur.promoter_caps if c.is_over_cap)} cap breach(es)</p>
