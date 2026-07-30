@@ -122,6 +122,10 @@ OWNER_SKU_TO_RETAIL = {
     "OWNER WYCLIFF ROSE": "HOUSE CHAMPAGNE BTL WYCLIFF",
     "OWNER DON ANEJO": "BTL Don Julio Anejo",
     "OWNER DUSSE": "BTL Dusse",
+    # Champagne extras discovered 2026-07-30
+    "OWNER VEUVE": "Veuve Clicquot Yellow Label BTL",
+    "OWNER DOM PERIGNON": "Dom P",
+    "OWNER PROSECCO ROSE": "PROSECCO ROSE",
 }
 
 # Standard retail prices for non-Tier-2 items used by Owner Contribution calc.
@@ -137,6 +141,9 @@ _STANDARD_RETAIL_EXTRAS = {
     "Bellaire Rose BTL": 169.0,
     "HOUSE CHAMPAGNE BTL WYCLIFF": 80.0,
     "BTL Dusse": 269.0,
+    "Veuve Clicquot Yellow Label BTL": 231.0,
+    "Dom P": 692.0,
+    "PROSECCO ROSE": 14.0,
 }
 
 
