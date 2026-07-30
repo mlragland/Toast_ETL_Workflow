@@ -49,19 +49,23 @@ TIER_1_MAX_RETAIL = 500.0
 PROMOTER_CAPS = [
     {"key": "thu_afrikan", "dow": 3, "day": "Thursday",
      "event": "Afrikan", "poc": "Kelvin", "cap": 2, "type": "external",
-     "tab_signals": ["afrikan", "kelvin", "promo thurs", "igbo"]},
+     # Add other Thursday POC names + historical tab patterns
+     "tab_signals": ["afrikan", "kelvin", "promo thurs", "igbo",
+                     "keith", "anno", "swan"]},
     {"key": "fri_106", "dow": 4, "day": "Friday",
      "event": "106 & Friday", "poc": "In-House", "cap": 3, "type": "internal",
-     "tab_signals": ["106", "106 & friday"]},
+     "tab_signals": ["106", "106 & friday", "106&friday"]},
     {"key": "sat_nbrb", "dow": 5, "day": "Saturday",
      "event": "Nothing But R&B", "poc": "In-House", "cap": 3, "type": "internal",
-     "tab_signals": ["nothing but r&b", "nbrb", "r&b"]},
+     "tab_signals": ["nothing but r&b", "nbrb", "r&b", "nothing but rnb"]},
     {"key": "sun_dae7", "dow": 6, "day": "Sunday", "daypart": "brunch",
      "event": "DAE7 Brunch + Karaoke", "poc": "Tiffany", "cap": 2, "type": "external",
-     "tab_signals": ["dae7", "brunch", "karaoke"]},
+     # Bare "tiffany" on Sunday routes here per policy §3.4
+     "tab_signals": ["dae7", "brunch", "karaoke", "tiffany"]},
     {"key": "sun_cassette", "dow": 6, "day": "Sunday", "daypart": "late_night",
      "event": "Cassette Sunday", "poc": "Tony", "cap": 2, "type": "external",
-     "tab_signals": ["cassette"]},
+     # Bare "tony" on Sunday routes here per policy §3.5
+     "tab_signals": ["cassette", "casette", "tony"]},
 ]
 
 # Days of the week LOV3 operates (Tue-Sun; Mon closed)
@@ -88,23 +92,45 @@ TIER_2_RETAIL_MAP = {
 }
 
 # OWNER SKU → canonical retail equivalent (name in TIER_2_RETAIL_MAP or plain retail).
-# Ownership of the mapping decisions belongs to leadership; adjust if wrong.
+# Verified from Toast /menus/v2/menus on 2026-07-29.
 OWNER_SKU_TO_RETAIL = {
+    # Tier 2 mappings
     "OWNER ACE": "Ace BTL",
     "OWNER ACE ROSE": "Ace Rose BTL",
     "Owner Ace Rose": "Ace Rose BTL",
     "OWNER DON 1942": "BTL Don Julio 1942",
     "OWNER CLASE AZUL": "BTL Clase Azul",
-    "OWNER MOET ICE": "Moet Ice BTL",  # not in Tier 2 map — fall back to standard lookup
+    "OWNER DUSSE XO": "BTL Dusse XO",
     "$1942 BTL": "BTL 1942 Magnum",
     "$Ace BTL": "Ace Magnum BTL",
     "$Clase Azul BTL": "BTL Clase Magnum",
+    # Tier 1 mappings (below $500 retail; still tracked for foregone visibility)
+    "OWNER MOET ICE": "Moet Ice BTL",
+    "OWNER MOET ROSE": "Moet Rose Nectar BTL",
+    "OWNER DON REPO": "BTL Don Julio Repo",
+    "OWNER KETEL ONE": "BTL Ketel One",
+    "OWNER LALO": "Lalo blanco BTL",
+    "OWNER HENNESSY": "BTL Hennessy",
+    "OWNER BELLAIRE": "Bellaire Rose BTL",
+    "OWNER WYCLIFF BTL": "HOUSE CHAMPAGNE BTL WYCLIFF",
+    "OWNER WYCLIFF ROSE": "HOUSE CHAMPAGNE BTL WYCLIFF",
+    "OWNER DON ANEJO": "BTL Don Julio Anejo",
+    "OWNER DUSSE": "BTL Dusse",
 }
 
-# Standard retail prices for non-Tier-2 items used by Owner Contribution calc
+# Standard retail prices for non-Tier-2 items used by Owner Contribution calc.
+# All verified from Toast API 2026-07-29.
 _STANDARD_RETAIL_EXTRAS = {
     "Moet Ice BTL": 216.0,
-    # OWNER items priced at cost — for retail lookup we use OWNER_SKU_TO_RETAIL mapping
+    "Moet Rose Nectar BTL": 297.0,
+    "BTL Don Julio Repo": 346.0,
+    "BTL Don Julio Anejo": 346.0,
+    "BTL Ketel One": 200.0,
+    "Lalo blanco BTL": 269.0,
+    "BTL Hennessy": 269.0,
+    "Bellaire Rose BTL": 169.0,
+    "HOUSE CHAMPAGNE BTL WYCLIFF": 80.0,
+    "BTL Dusse": 269.0,
 }
 
 
@@ -152,7 +178,9 @@ BUCKET_LABELS = {
     "programmatic_birthday": "Birthday",
     "programmatic_promoter": "Promoter",
     "programmatic_standing": "Standing (Wycliffe etc.)",
+    "programmatic_marketing": "Marketing (Distributor/Tasting)",
     "owner_discretion": "Owner",
+    "vip": "VIP Comp",
     "recovery": "Recovery (Spillage/Quality)",
     "employee": "Employee Discount",
     "discretionary_manager": "Manager Discretionary",
@@ -189,10 +217,12 @@ def classify_comp_item(menu_item: Optional[str]) -> Optional[str]:
 
     LOV3's menu carries the intent inside the SKU name:
       OWNER MOET ROSE, OWNER DON REPO, OWNER LALO → owner_discretion
+      $Ace BTL, $1942 BTL, $Clase Azul BTL         → owner_discretion (magnum cost basis)
       OWNER WYCLIFF BTL                           → programmatic_standing
       Thursday Don Repo, Thursday Anejo,          → programmatic_promoter
         Thursday Lamb Chops, Thursday Steak Dinner
       BIRTHDAY SHOT (lemon drop), Birthday Dessert → programmatic_birthday
+      Bday party (any 'Bday' substring)           → programmatic_birthday
 
     Returns None when the SKU carries no such signal — caller falls back to
     reason-code classification.
@@ -200,14 +230,14 @@ def classify_comp_item(menu_item: Optional[str]) -> Optional[str]:
     if not menu_item:
         return None
     m = menu_item.upper().strip()
-    # Birthday match (case-insensitive substring — "BIRTHDAY SHOT", "Birthday Dessert")
-    if "BIRTHDAY" in m:
+    # Birthday match (BIRTHDAY substring OR "BDAY" alias per policy §4)
+    if "BIRTHDAY" in m or "BDAY" in m:
         return "programmatic_birthday"
     # Wycliffe standing comp uses SKU prefix "OWNER WYCLIFF ..."
     if "WYCLIFF" in m:
         return "programmatic_standing"
-    # Owner-tab SKUs are prefixed "OWNER "
-    if m.startswith("OWNER "):
+    # Owner-tab SKUs — OWNER or $ prefix (both are cost-basis mechanisms)
+    if m.startswith("OWNER ") or m.startswith("$"):
         return "owner_discretion"
     # Thursday promoter SKUs prefixed "Thursday " / "THURSDAY "
     if m.startswith("THURSDAY"):
@@ -215,16 +245,85 @@ def classify_comp_item(menu_item: Optional[str]) -> Optional[str]:
     return None
 
 
-def classify_final(reason: Optional[str], menu_item: Optional[str]) -> str:
-    """Resolve the final bucket. Item-level SKU signal wins over reason code.
+def classify_comp_tab(tab_name: Optional[str],
+                      processing_date: Optional[str] = None) -> Optional[str]:
+    """Return the bucket implied by a tab name, per COMP_MANAGEMENT_POLICY.md §4.
 
-    Rationale: managers often ring OWNER-prefixed bottles under a generic
-    "Manager Comp" reason code. The SKU name is deterministic — the reason
-    code is manual and error-prone.
+    Precedence (first match wins):
+      1. Recovery signals (Spill*, Bug*, Bottle Broke*, *Broke)
+      2. Owner Personal (Maurice/Eddie/Derwin variants)
+      3. Owner Tasting (Owner Tasting - *, *Owner Tasting*)
+      4. VIP (VIP - *)
+      5. Birthday (*Birthday*, *Bday*)
+      6. Promoter (Promoter *, Promo *, or named POC + weekday match)
+      7. Marketing (Tasting *, Distributor *, Wycliffe *)
+
+    Returns None when the tab carries no signal — caller falls back to SKU/reason.
     """
+    if not tab_name:
+        return None
+    t = tab_name.strip().lower()
+
+    # Recovery — server tab shortcuts for spillage/breakage/quality
+    if (t.startswith("spill") or t.startswith("bug") or
+        t.startswith("bottle broke") or "broke" in t):
+        return "recovery"
+
+    # Owner Personal — Maurice/Eddie/Derwin (case handled by lower())
+    for kw in ("maurice", "eddie", "derwin"):
+        if t.startswith(kw) or t.startswith(f"per {kw}"):
+            # But not "Owner Tasting - Maurice" which routes below
+            if "tasting" not in t:
+                return "owner_discretion"
+
+    # Owner Tasting (owner discretionary — hosting an event)
+    if "owner tasting" in t or t.startswith("tasting -"):
+        return "owner_discretion"
+
+    # VIP Comp bucket (policy §2)
+    if t.startswith("vip -") or t.startswith("vip:") or t.startswith("vip "):
+        return "vip"
+
+    # Birthday
+    if "birthday" in t or "bday" in t:
+        return "programmatic_birthday"
+
+    # Promoter — explicit prefix or POC name on right weekday
+    if t.startswith("promoter") or t.startswith("promo "):
+        return "programmatic_promoter"
+
+    # Marketing (distributor tastings, brand tastings, Wycliffe)
+    if (t.startswith("tasting") or t.startswith("distributor")
+        or "wycliff" in t):
+        return "programmatic_marketing"
+
+    # POC-name based promoter matching (Sunday Tiffany/Tony bare names, etc.)
+    if processing_date:
+        cap = match_promoter_cap(tab_name, processing_date)
+        if cap:
+            return "programmatic_promoter"
+
+    return None
+
+
+def classify_final(reason: Optional[str], menu_item: Optional[str],
+                   tab_name: Optional[str] = None,
+                   processing_date: Optional[str] = None) -> str:
+    """Resolve the final bucket. Policy precedence: Tab > SKU > Reason (§3).
+
+    Rationale: the tab name is closest to human intent. SKU (e.g. OWNER-prefixed)
+    is deterministic but can be overridden by a promoter tab. Reason code is
+    manual and error-prone — used only as final fallback.
+    """
+    # 1. Tab name wins if it carries a signal
+    tab_bucket = classify_comp_tab(tab_name, processing_date)
+    if tab_bucket:
+        return tab_bucket
+    # 2. Item SKU signal
     item_bucket = classify_comp_item(menu_item)
     if item_bucket:
         return item_bucket
+    # 3. Reason code fallback
     return classify_comp_reason(reason)
 
 
@@ -490,9 +589,10 @@ class CompPeriod:
 
     def discretionary_grade(self) -> Tuple[str, str]:
         p = self.discretionary_pct
-        if p < DISCRETIONARY_TARGET_PCT:
+        # Policy target "≤1.5%" — inclusive boundary
+        if p <= DISCRETIONARY_TARGET_PCT:
             return ("On Target", "grade-excellent")
-        if p < DISCRETIONARY_WATCH_PCT:
+        if p <= DISCRETIONARY_WATCH_PCT:
             return ("Watch", "grade-warn")
         return ("Investigate", "grade-alert")
 
@@ -661,18 +761,32 @@ class CompAnalytics:
         ]
 
     def _fetch_check_totals(self, start: str, end: str) -> Dict[str, float]:
-        """Return {check_id: total} — what was actually collected on each check.
+        """Return {check_id: paid_amount_excluding_tax_and_tip}.
 
-        Used to distinguish:
-          - check total > 0 AND owner tab → Owner paid (contribution)
-          - check total = 0 → house-comped (foregone retail)
+        CheckDetails.total includes tax + tip + gratuity, so a fully house-comped
+        check with a residual tax line would fail the `check_total == 0` gate.
+        We derive the net-of-tax paid amount from PaymentDetails.amount summed
+        per check (which is the sale amount collected, excl. tip and gratuity).
+        Falls back to CheckDetails.total minus tax when no payment record exists.
         """
         q = f"""
-        SELECT
-          CAST(check_id AS STRING) AS check_id,
-          SAFE_CAST(total AS FLOAT64) AS total
-        FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
-        WHERE processing_date BETWEEN @start AND @end
+        WITH paid AS (
+          SELECT CAST(check_id AS STRING) AS check_id,
+                 SUM(SAFE_CAST(amount AS FLOAT64)) AS paid
+          FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
+          WHERE processing_date BETWEEN @start AND @end
+          GROUP BY check_id
+        ),
+        cd AS (
+          SELECT CAST(check_id AS STRING) AS check_id,
+                 SAFE_CAST(total AS FLOAT64) AS total,
+                 SAFE_CAST(tax AS FLOAT64) AS tax
+          FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
+          WHERE processing_date BETWEEN @start AND @end
+        )
+        SELECT cd.check_id,
+               COALESCE(paid.paid, GREATEST(cd.total - COALESCE(cd.tax, 0), 0)) AS collected
+        FROM cd LEFT JOIN paid USING (check_id)
         """
         job = self.bq.query(q, job_config=bigquery.QueryJobConfig(
             query_parameters=[
@@ -680,7 +794,7 @@ class CompAnalytics:
                 bigquery.ScalarQueryParameter("end", "DATE", end),
             ]
         ))
-        return {row.check_id: float(row.total or 0.0) for row in job.result()}
+        return {row.check_id: float(row.collected or 0.0) for row in job.result()}
 
     def _fetch_item_log(self, start: str, end: str) -> List[ItemComp]:
         """Full item-level activity log for the period.
@@ -779,6 +893,13 @@ class CompAnalytics:
         check_totals = self._fetch_check_totals(start, end)
         item_hints = self._build_item_hints([it for it in item_log if it.discount > 0])
 
+        # check_id → tab_name lookup (from item log, since CheckDetails lacks tab_name).
+        # Enables tab-name-first classification precedence at the check level.
+        check_tab: Dict[str, str] = {}
+        for it in item_log:
+            if it.check_id and it.check_id not in check_tab and it.tab_name:
+                check_tab[it.check_id] = it.tab_name
+
         period = CompPeriod(label=label, start=start, end=end, net_sales=net_sales)
         # Filter item_log for the discount-only path (existing logic uses this)
         # Keep the full item_log accessible via item_log field for new sections
@@ -787,21 +908,31 @@ class CompAnalytics:
         for row in comps:
             reason_bucket = row.bucket  # from reason code
             hint = item_hints.get(row.check_id)
+            tab_name = check_tab.get(row.check_id)
 
-            # Item SKU wins over reason code when they disagree.
-            if hint and hint["bucket"] != reason_bucket:
-                period.mismatches.append(ItemMismatch(
-                    check_id=row.check_id,
-                    server=row.server,
-                    reason_bucket=reason_bucket,
-                    item_bucket=hint["bucket"],
-                    top_item=hint["top_item"],
-                    amount=row.amount,
-                ))
-                row.bucket = hint["bucket"]
-            elif hint:
-                # Same bucket — item confirms reason code; no mismatch flag.
-                row.bucket = hint["bucket"]
+            # Apply full policy precedence: Tab > SKU > Reason (§3)
+            top_item = hint["top_item"] if hint else None
+            final_bucket = classify_final(row.reason, top_item, tab_name, row.processing_date)
+
+            # Track mismatch if final differs from reason
+            if final_bucket != reason_bucket:
+                # Determine what overrode the reason: tab-name or SKU
+                tab_bucket = classify_comp_tab(tab_name, row.processing_date) if tab_name else None
+                sku_bucket = hint["bucket"] if hint else None
+                override_source = (
+                    f"tab-name({tab_name})" if tab_bucket else
+                    f"item-SKU({top_item})" if sku_bucket else None
+                )
+                if override_source:
+                    period.mismatches.append(ItemMismatch(
+                        check_id=row.check_id,
+                        server=row.server,
+                        reason_bucket=reason_bucket,
+                        item_bucket=final_bucket,
+                        top_item=top_item or (tab_name or ""),
+                        amount=row.amount,
+                    ))
+            row.bucket = final_bucket
 
             if row.bucket in EXCLUDED_BUCKETS:
                 continue
@@ -876,17 +1007,24 @@ class CompAnalytics:
         # by the new tier2_movements + owner_contributions passes below.
         comp_items = [it for it in period.item_log if it.discount > 0]
 
-        # By day of week (LOV3 operating days only, ordered Tue-Sun)
-        for it in comp_items:
-            if it.day_of_week not in _DAY_ORDER:
+        # By day of week — use CHECK-LEVEL totals so amounts match blended %
+        # (item-level would undercount because check-level Owner-Comps aren't
+        # allocated to individual item rows in Toast)
+        for row in comps:
+            if row.bucket in EXCLUDED_BUCKETS:
+                continue
+            try:
+                dow = date.fromisoformat(row.processing_date).strftime("%A")
+            except (ValueError, TypeError):
+                continue
+            if dow not in _DAY_ORDER:
                 continue
             entry = period.by_day.setdefault(
-                it.day_of_week,
-                DailyTotal(day=it.day_of_week, date_iso=it.processing_date),
+                dow, DailyTotal(day=dow, date_iso=row.processing_date),
             )
-            entry.total += it.discount
+            entry.total += row.amount
             entry.count += 1
-            entry.by_bucket[it.bucket] = entry.by_bucket.get(it.bucket, 0.0) + it.discount
+            entry.by_bucket[row.bucket] = entry.by_bucket.get(row.bucket, 0.0) + row.amount
 
         # Top comped items (leaderboard)
         item_agg: Dict[str, Tuple[int, float]] = {}
@@ -934,6 +1072,9 @@ class CompAnalytics:
             })
 
         # ── TIER 2 BOTTLE MOVEMENTS (all rings, comped OR paid) ─────
+        # Semantics fix per audit: cost_recovered = what LOV3 actually collected
+        # (cost basis for OWNER SKUs when owner paid; retail for non-OWNER when
+        # someone else paid). Non-owner retail sales are NOT foregone revenue.
         for it in period.item_log:
             retail = get_retail_price(it.menu_item)
             is_t2_activity = (it.menu_item in TIER_2_RETAIL_MAP
@@ -951,17 +1092,20 @@ class CompAnalytics:
                 movement.retail_value_moved += retail
 
             owner_tab = match_owner_from_tab(it.tab_name) is not None
-            house_comped = check_total == 0
+            house_comped = check_total <= 0.01  # tiny threshold guards floating point
 
             if house_comped:
                 movement.house_comped_count += 1
+                # Nothing recovered; retail moves into foregone
             elif owner_tab:
                 movement.owner_paid_count += 1
+                # Owner contributed the cost basis (item gross_price is cost for OWNER SKUs)
                 movement.cost_recovered += it.gross_price
             else:
                 movement.other_paid_count += 1
-                # Someone else paid retail; no house loss
-                movement.cost_recovered += it.gross_price
+                # Guest paid at (approx) retail. Not a house loss.
+                # Use retail as the recovered value so foregone nets to 0 for these.
+                movement.cost_recovered += (retail if retail else it.gross_price)
 
         # Compute foregone revenue = retail value moved - cost recovered
         for m in period.tier_2_movements.values():
@@ -1064,6 +1208,7 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
                 or cur.discretionary_pct >= DISCRETIONARY_WATCH_PCT
                 or cur.manager_disc_pct > MANAGER_DISC_TARGET_PCT
                 or cur.recovery_pct > RECOVERY_TARGET_PCT * 2
+                or cur.uncategorized_dollars > 500  # policy target is $0
                 or any(c.is_over_cap or c.tier_2_count > 0 for c in cur.promoter_caps))
     icon = "🔴" if is_alert else "✅"
 
@@ -1082,19 +1227,55 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
     mgr_disc_label, _ = cur.manager_disc_grade()
     recovery_label, _ = cur.recovery_grade()
 
+    # Money at Risk — top-of-report leadership framing per agent audit
+    tier2_foregone = sum(m.foregone_revenue for m in cur.tier_2_movements.values())
+    tier2_house_comped_count = sum(m.house_comped_count for m in cur.tier_2_movements.values())
+    cap_breaches = [c for c in cur.promoter_caps if c.is_over_cap]
+    external_clawback = sum(
+        c.excess_bottles * 0.8 * 300 for c in cap_breaches if c.cap_type == "external"
+    )
+    uncateg = cur.uncategorized_dollars
+
+    money_at_risk_lines = []
+    if tier2_foregone > 0:
+        money_at_risk_lines.append(
+            f"  • *${tier2_foregone:,.0f}* foregone on {tier2_house_comped_count} "
+            f"Tier 2 house-comped bottle(s)"
+        )
+    if cap_breaches:
+        breach_summary = ", ".join(f"{c.event} +{c.excess_bottles}" for c in cap_breaches)
+        clawback_str = f" → ~${external_clawback:,.0f} clawback" if external_clawback else ""
+        money_at_risk_lines.append(f"  • {len(cap_breaches)} cap breach: {breach_summary}{clawback_str}")
+    if uncateg > 500:
+        money_at_risk_lines.append(
+            f"  • *${uncateg:,.0f}* in uncategorized ring-ins — reason code required"
+        )
+
     lines = [
         f"{icon} *LOV3 Comp Report — Week of {cur.label}*",
         "",
-        "════ HEADLINE ════",
-        f"Blended:            *{cur.total_pct:.2f}%*  target <{BLENDED_TARGET_PCT:.0f}%   {_grade_icon(blended_label)} {blended_label}"
-        f"{_wow(cur.total_pct, prev.total_pct)}",
-        f"Manager Discret.:   *{cur.manager_disc_pct:.2f}%*  target ≤{MANAGER_DISC_TARGET_PCT:.1f}%   {_grade_icon(mgr_disc_label)} {mgr_disc_label}",
-        f"Recovery:           *{cur.recovery_pct:.2f}%*  target ≤{RECOVERY_TARGET_PCT:.1f}%   {_grade_icon(recovery_label)} {recovery_label}",
-        f"Uncategorized:      *${cur.uncategorized_dollars:,.0f}*  target $0",
-        f"Net sales base:     ${cur.net_sales:,.0f}",
-        "",
-        "════ BY DAY OF WEEK ════",
     ]
+    if money_at_risk_lines:
+        lines.append("════ MONEY AT RISK ════")
+        lines.extend(money_at_risk_lines)
+        lines.append("")
+    lines.append("════ HEADLINE ════")
+    lines.append(
+        f"Blended:            *{cur.total_pct:.2f}%*  target <{BLENDED_TARGET_PCT:.0f}%   "
+        f"{_grade_icon(blended_label)} {blended_label}{_wow(cur.total_pct, prev.total_pct)}"
+    )
+    lines.append(
+        f"Manager Discret.:   *{cur.manager_disc_pct:.2f}%*  target ≤{MANAGER_DISC_TARGET_PCT:.1f}%   "
+        f"{_grade_icon(mgr_disc_label)} {mgr_disc_label}"
+    )
+    lines.append(
+        f"Recovery:           *{cur.recovery_pct:.2f}%*  target ≤{RECOVERY_TARGET_PCT:.1f}%   "
+        f"{_grade_icon(recovery_label)} {recovery_label}"
+    )
+    lines.append(f"Uncategorized:      *${cur.uncategorized_dollars:,.0f}*  target $0")
+    lines.append(f"Net sales base:     ${cur.net_sales:,.0f}")
+    lines.append("")
+    lines.append("════ BY DAY OF WEEK ════")
 
     if cur.by_day:
         for day in LOV3_OPERATING_DAYS:
@@ -1158,6 +1339,10 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
             f"Programmatic ${bm.programmatic_comp:,.0f} · "
             f"Discretionary ${bm.discretionary_comp:,.0f}"
         )
+        lines.append(
+            "  (Note: comps rung under Bottle Manager on promoter tabs also count in "
+            "the cap table above — see attribution on `/comps`.)"
+        )
 
     # ════ TIER 2 BOTTLE ACTIVITY ════
     if cur.tier_2_movements:
@@ -1186,10 +1371,10 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
                 f"retail ${m.retail_value_moved:,.0f}  foregone ${m.foregone_revenue:,.0f}"
             )
 
-    # ════ OWNER CONTRIBUTION LEDGER ════
+    # ════ OWNER PERSONAL TABS ════ (Maurice/Eddie/Derwin — paid vs house-comped)
     if cur.owner_contributions:
         lines.append("")
-        lines.append("════ OWNER CONTRIBUTION LEDGER ════")
+        lines.append("════ OWNER PERSONAL TABS ════")
         for owner_name in ["Maurice", "Eddie", "Derwin"]:
             oc = cur.owner_contributions.get(owner_name)
             if not oc or (oc.paid_by_owner == 0 and oc.house_comped_at_cost == 0):
@@ -1207,12 +1392,22 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
                     f"{oc.tabs_house_comped} tab(s) (est. retail ${oc.house_comped_retail_estimate:,.0f})"
                 )
 
-    # ════ OWNER LOG (LEGACY — comp-only view) ════
-    lines.append("")
-    lines.append("════ OTHER OWNER-BUCKET COMPS ════")
+    # ════ OWNER DISCRETIONARY (non-personal) ════ — Owner Comp used on VIP guests etc.
     owner_disc = cur.by_bucket.get("owner_discretion", 0.0)
     owner_disc_cnt = cur.by_bucket_count.get("owner_discretion", 0)
-    lines.append(f"Owner Discretionary bucket: ${owner_disc:,.0f} ({owner_disc_cnt} events)")
+    # Subtract owner-personal totals (already covered above) — best-effort estimate
+    owner_personal_total = sum(
+        (oc.paid_by_owner + oc.house_comped_at_cost)
+        for oc in cur.owner_contributions.values()
+    )
+    non_personal = max(0.0, owner_disc - owner_personal_total)
+    if non_personal > 0:
+        lines.append("")
+        lines.append("════ OWNER DISCRETIONARY (non-personal) ════")
+        lines.append(
+            f"Non-personal-tab owner comps: ${non_personal:,.0f} "
+            f"(hosting VIPs, industry pros, chef guests)"
+        )
 
     # ════ PROTOCOL FLAGS ════
     open_flags = [f for f in cur.flagged
@@ -1236,24 +1431,55 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
     if not open_flags and not cur.mismatches and not cap_breaches and not tier2_violations:
         lines.append("✅ No protocol flags this week")
 
-    # ════ ACTION ITEMS ════
+    # ════ ACTION ITEMS ════ (each includes check_id or tab_name for actionability)
     actions = []
+    # Manager discretionary review — surface top 3 check_ids for their biggest comps
     for name, s in cur.named_scorecards.items():
         if s.discretionary_comp >= 500 and s.role == "Manager":
-            actions.append(f"{name} elevated discretionary (${s.discretionary_comp:,.0f}) — review largest comps")
+            top_items = sorted(
+                [it for it in cur.item_log if it.server == name and it.discount > 0],
+                key=lambda x: -x.discount,
+            )[:3]
+            hint = ""
+            if top_items:
+                hint = " · Top checks: " + ", ".join(
+                    f"#{it.check_id[-6:]}({it.menu_item[:20]} ${it.discount:.0f})"
+                    for it in top_items
+                )
+            actions.append(
+                f"{name} elevated discretionary (${s.discretionary_comp:,.0f}) — review{hint}"
+            )
     for cap in cur.promoter_caps:
         if cap.is_over_cap and cap.cap_type == "external":
             clawback = cap.excess_bottles * 0.8 * 300  # rough Tier 1 avg estimate
+            items_hint = f" · Items: {', '.join(cap.sample_items[:3])}" if cap.sample_items else ""
             actions.append(
                 f"Promoter clawback: {cap.event} ({cap.poc}) over by {cap.excess_bottles} bottle(s) "
-                f"→ ~${clawback:,.0f} against next payout"
+                f"→ ~${clawback:,.0f} against next payout{items_hint}"
             )
         elif cap.is_over_cap and cap.cap_type == "internal":
             actions.append(
                 f"In-house event overage: {cap.event} +{cap.excess_bottles} bottle(s) → excess promotional spend"
             )
     if open_flags:
-        actions.append(f"{len(open_flags)} uncategorized ring-ins need reason-code training")
+        top_open = sorted(open_flags, key=lambda x: -x.amount)[:3]
+        servers = ", ".join(sorted({f.server for f in open_flags if f.server}))
+        actions.append(
+            f"{len(open_flags)} uncategorized ring-ins (${sum(f.amount for f in open_flags):,.0f}) "
+            f"— from {servers or 'unknown'} · biggest: "
+            + ", ".join(f"#{f.check_id[-6:]} ${f.amount:.0f}" for f in top_open)
+        )
+    # Tier 2 house-comps that need review
+    tier2_house_comped = [
+        (name, m) for name, m in cur.tier_2_movements.items()
+        if m.house_comped_count > 0 and m.foregone_revenue >= 500
+    ]
+    if tier2_house_comped:
+        for name, m in sorted(tier2_house_comped, key=lambda kv: -kv[1].foregone_revenue)[:3]:
+            actions.append(
+                f"Tier 2 review: {name} × {m.house_comped_count} house-comped "
+                f"→ ${m.foregone_revenue:,.0f} foregone"
+            )
 
     if actions:
         lines.append("")
