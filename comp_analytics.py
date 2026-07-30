@@ -34,6 +34,12 @@ DISCRETIONARY_WATCH_PCT = 2.0        # Alert threshold
 MANAGER_DISC_TARGET_PCT = 1.0        # Manager Discretionary only, per policy
 RECOVERY_TARGET_PCT = 0.5            # Recovery bucket target
 UNCATEGORIZED_TARGET_DOLLARS = 0.0   # Zero target — every comp needs a code
+# Uncategorized ring-ins above this trigger a red Slack alert. Policy target
+# is $0; the threshold gives operational tolerance for one-off training misses.
+UNCATEGORIZED_ALERT_THRESHOLD = 500.0
+# Approx avg Tier 1 bottle retail — used for external promoter clawback estimates
+# in the Money at Risk headline. Refresh from Toast API when menu changes.
+AVG_TIER_1_RETAIL = 300.0
 
 # Named lists per COMP_MANAGEMENT_POLICY.md
 MANAGERS = ["Tiffany Loving", "Anthony Winn", "Dajah Bishop"]
@@ -276,8 +282,10 @@ def classify_comp_tab(tab_name: Optional[str],
             if "tasting" not in t:
                 return "owner_discretion"
 
-    # Owner Tasting (owner discretionary — hosting an event)
-    if "owner tasting" in t or t.startswith("tasting -"):
+    # Owner Tasting (owner discretionary — owner hosting a tasting event)
+    # Note: bare "Tasting - X" (no "Owner" prefix) is a distributor/marketing
+    # tasting and routes to programmatic_marketing below.
+    if "owner tasting" in t:
         return "owner_discretion"
 
     # VIP Comp bucket (policy §2)
@@ -763,11 +771,14 @@ class CompAnalytics:
     def _fetch_check_totals(self, start: str, end: str) -> Dict[str, float]:
         """Return {check_id: paid_amount_excluding_tax_and_tip}.
 
-        CheckDetails.total includes tax + tip + gratuity, so a fully house-comped
-        check with a residual tax line would fail the `check_total == 0` gate.
-        We derive the net-of-tax paid amount from PaymentDetails.amount summed
-        per check (which is the sale amount collected, excl. tip and gratuity).
-        Falls back to CheckDetails.total minus tax when no payment record exists.
+        Definition of "collected":
+          - If PaymentDetails has any row for the check → sum of PaymentDetails.amount
+            (the sale amount actually collected, excl. tip/gratuity).
+          - If NO PaymentDetails row → 0 (conservative). This treats open checks
+            AND legitimately house-comped checks the same way. Open checks are
+            rare in weekly reporting since shifts close by end of day; ad-hoc
+            reports on the previous night would still see them as house-comped,
+            which is the safer classification (avoids false-positive "owner paid").
         """
         q = f"""
         WITH paid AS (
@@ -778,14 +789,11 @@ class CompAnalytics:
           GROUP BY check_id
         ),
         cd AS (
-          SELECT CAST(check_id AS STRING) AS check_id,
-                 SAFE_CAST(total AS FLOAT64) AS total,
-                 SAFE_CAST(tax AS FLOAT64) AS tax
+          SELECT CAST(check_id AS STRING) AS check_id
           FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
           WHERE processing_date BETWEEN @start AND @end
         )
-        SELECT cd.check_id,
-               COALESCE(paid.paid, GREATEST(cd.total - COALESCE(cd.tax, 0), 0)) AS collected
+        SELECT cd.check_id, COALESCE(paid.paid, 0.0) AS collected
         FROM cd LEFT JOIN paid USING (check_id)
         """
         job = self.bq.query(q, job_config=bigquery.QueryJobConfig(
@@ -1208,7 +1216,7 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
                 or cur.discretionary_pct >= DISCRETIONARY_WATCH_PCT
                 or cur.manager_disc_pct > MANAGER_DISC_TARGET_PCT
                 or cur.recovery_pct > RECOVERY_TARGET_PCT * 2
-                or cur.uncategorized_dollars > 500  # policy target is $0
+                or cur.uncategorized_dollars > UNCATEGORIZED_ALERT_THRESHOLD
                 or any(c.is_over_cap or c.tier_2_count > 0 for c in cur.promoter_caps))
     icon = "🔴" if is_alert else "✅"
 
@@ -1232,7 +1240,8 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
     tier2_house_comped_count = sum(m.house_comped_count for m in cur.tier_2_movements.values())
     cap_breaches = [c for c in cur.promoter_caps if c.is_over_cap]
     external_clawback = sum(
-        c.excess_bottles * 0.8 * 300 for c in cap_breaches if c.cap_type == "external"
+        c.excess_bottles * 0.8 * AVG_TIER_1_RETAIL
+        for c in cap_breaches if c.cap_type == "external"
     )
     uncateg = cur.uncategorized_dollars
 
@@ -1246,7 +1255,7 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
         breach_summary = ", ".join(f"{c.event} +{c.excess_bottles}" for c in cap_breaches)
         clawback_str = f" → ~${external_clawback:,.0f} clawback" if external_clawback else ""
         money_at_risk_lines.append(f"  • {len(cap_breaches)} cap breach: {breach_summary}{clawback_str}")
-    if uncateg > 500:
+    if uncateg > UNCATEGORIZED_ALERT_THRESHOLD:
         money_at_risk_lines.append(
             f"  • *${uncateg:,.0f}* in uncategorized ring-ins — reason code required"
         )
@@ -1451,7 +1460,7 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
             )
     for cap in cur.promoter_caps:
         if cap.is_over_cap and cap.cap_type == "external":
-            clawback = cap.excess_bottles * 0.8 * 300  # rough Tier 1 avg estimate
+            clawback = cap.excess_bottles * 0.8 * AVG_TIER_1_RETAIL
             items_hint = f" · Items: {', '.join(cap.sample_items[:3])}" if cap.sample_items else ""
             actions.append(
                 f"Promoter clawback: {cap.event} ({cap.poc}) over by {cap.excess_bottles} bottle(s) "

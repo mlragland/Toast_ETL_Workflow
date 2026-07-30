@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from comp_analytics import (
+    AVG_TIER_1_RETAIL,
     BLENDED_TARGET_PCT,
     BLENDED_WATCH_PCT,
     BUCKET_LABELS,
@@ -16,10 +17,17 @@ from comp_analytics import (
     DISCRETIONARY_TARGET_PCT,
     DISCRETIONARY_WATCH_PCT,
     ItemMismatch,
+    OWNER_SKU_TO_RETAIL,
+    PromoterCapResult,
+    TIER_2_RETAIL_MAP,
+    Tier2Movement,
+    UNCATEGORIZED_ALERT_THRESHOLD,
     build_weekly_slack_message,
     classify_comp_item,
     classify_comp_reason,
+    classify_comp_tab,
     classify_final,
+    get_retail_price,
     last_completed_week,
     prior_week,
     trailing_window,
@@ -531,3 +539,265 @@ def test_bucket_labels_cover_all_buckets():
     ]}
     for b in produced_buckets:
         assert b in BUCKET_LABELS, f"missing label for bucket {b}"
+
+
+# ── classify_comp_tab — tab-name routing (top precedence per policy §3) ──
+
+def test_classify_tab_recovery_spill():
+    assert classify_comp_tab("Spill") == "recovery"
+    assert classify_comp_tab("Spill - Don Julio") == "recovery"
+
+
+def test_classify_tab_recovery_bug_and_broke():
+    assert classify_comp_tab("Bug in fries") == "recovery"
+    assert classify_comp_tab("Bottle Broke - Makers") == "recovery"
+    assert classify_comp_tab("Glass Broke") == "recovery"
+
+
+def test_classify_tab_owner_personal():
+    assert classify_comp_tab("Maurice") == "owner_discretion"
+    assert classify_comp_tab("Maurice E9") == "owner_discretion"
+    assert classify_comp_tab("Per Maurice") == "owner_discretion"
+    assert classify_comp_tab("Eddie") == "owner_discretion"
+    assert classify_comp_tab("Derwin") == "owner_discretion"
+    # Case-insensitive
+    assert classify_comp_tab("MAURICE") == "owner_discretion"
+
+
+def test_classify_tab_owner_tasting():
+    # Owner Tasting is an owner-discretionary event, not "personal"
+    assert classify_comp_tab("Owner Tasting - Lalo") == "owner_discretion"
+    assert classify_comp_tab("Tasting - Casamigos") == "programmatic_marketing"
+
+
+def test_classify_tab_owner_tasting_beats_owner_personal():
+    # "Maurice Owner Tasting" — the tasting signal should override personal
+    assert classify_comp_tab("Maurice Owner Tasting") == "owner_discretion"
+
+
+def test_classify_tab_vip():
+    assert classify_comp_tab("VIP - Chef Torres - Industry") == "vip"
+    assert classify_comp_tab("VIP Guest") == "vip"
+
+
+def test_classify_tab_birthday():
+    assert classify_comp_tab("Birthday - Jasmine - 84293") == "programmatic_birthday"
+    assert classify_comp_tab("Bday party") == "programmatic_birthday"
+    assert classify_comp_tab("Sat Bday Packages") == "programmatic_birthday"
+
+
+def test_classify_tab_promoter_prefix():
+    assert classify_comp_tab("Promoter - Thursday - Afrikan - Kelvin") == "programmatic_promoter"
+    assert classify_comp_tab("Promo Thursday") == "programmatic_promoter"
+
+
+def test_classify_tab_marketing():
+    assert classify_comp_tab("Distributor - Sazerac") == "programmatic_marketing"
+    assert classify_comp_tab("Tasting - Southern Glazer") == "programmatic_marketing"
+    assert classify_comp_tab("Wycliffe Welcome") == "programmatic_marketing"
+
+
+def test_classify_tab_sunday_bare_tiffany_via_promoter_cap():
+    # Per policy §3.4 — bare "Tiffany" on a Sunday → Promoter (DAE7)
+    # 2026-07-26 is a Sunday
+    assert classify_comp_tab("Tiffany", "2026-07-26") == "programmatic_promoter"
+
+
+def test_classify_tab_sunday_bare_tony_via_promoter_cap():
+    # Per policy §3.5 — bare "Tony" on a Sunday → Promoter (Cassette)
+    assert classify_comp_tab("Tony", "2026-07-26") == "programmatic_promoter"
+
+
+def test_classify_tab_no_signal_returns_none():
+    assert classify_comp_tab("Table 12") is None
+    assert classify_comp_tab("Bar tab") is None
+    assert classify_comp_tab(None) is None
+    assert classify_comp_tab("") is None
+
+
+# ── classify_final — precedence: Tab > SKU > Reason ──
+
+def test_final_tab_wins_over_sku():
+    # Promoter tab with OWNER item → promoter (tab), not owner (SKU)
+    result = classify_final(
+        reason="Manager Comp - Item (100.00%)",
+        menu_item="OWNER MOET ROSE",
+        tab_name="Promoter - Thursday - Afrikan - Kelvin",
+    )
+    assert result == "programmatic_promoter"
+
+
+def test_final_tab_wins_recovery_over_owner_sku():
+    # Spill tab with OWNER item — treats the specific incident as recovery
+    result = classify_final(
+        reason="Owner Comp-Item (100.00%)",
+        menu_item="OWNER DON REPO",
+        tab_name="Spill - Don Julio",
+    )
+    assert result == "recovery"
+
+
+def test_final_sku_wins_over_reason_when_no_tab():
+    # No tab signal — OWNER SKU should override generic Manager Comp reason
+    result = classify_final(
+        reason="Manager Comp - Check (100.00%)",
+        menu_item="OWNER ACE",
+        tab_name="Table 12",  # no signal
+    )
+    assert result == "owner_discretion"
+
+
+def test_final_reason_fallback_when_no_tab_no_sku():
+    # Generic item + generic reason → uses reason
+    result = classify_final(
+        reason="Manager Comp - Check (100.00%)",
+        menu_item="Chicken Wings",
+        tab_name=None,
+    )
+    assert result == "discretionary_manager"
+
+
+def test_final_sunday_tiffany_tab_routes_to_promoter():
+    # Sunday brunch daypart with bare "Tiffany" tab
+    result = classify_final(
+        reason="Owner Comp-Check (100.00%)",
+        menu_item="BTL Clase Azul",
+        tab_name="Tiffany",
+        processing_date="2026-07-26",  # Sunday
+    )
+    assert result == "programmatic_promoter"
+
+
+def test_final_dollar_prefix_sku_routes_to_owner():
+    # $-prefix SKUs (Magnum cost-basis) should go to owner_discretion
+    result = classify_final(
+        reason="Manager Comp - Item (100.00%)",
+        menu_item="$Ace BTL",
+        tab_name=None,
+    )
+    assert result == "owner_discretion"
+
+
+def test_final_bday_alias_routes_to_birthday():
+    # "Bday" substring alias per policy §4
+    result = classify_final(
+        reason="Manager Comp - Check (100.00%)",
+        menu_item="Bday Special",
+        tab_name=None,
+    )
+    assert result == "programmatic_birthday"
+
+
+# ── Money at Risk headline logic ────────────────────────────────────
+
+def _period_with_tier2(house_comped: int, foregone: float) -> CompPeriod:
+    p = CompPeriod(label="w", start="s", end="e",
+                   net_sales=100_000.0, total_comp=1_000.0)
+    p.tier_2_movements = {
+        "OWNER ACE": Tier2Movement(
+            menu_item="OWNER ACE",
+            total_rings=house_comped,
+            house_comped_count=house_comped,
+            retail_value_moved=house_comped * 654.0,
+            cost_recovered=0.0,
+            foregone_revenue=foregone,
+        )
+    }
+    return p
+
+
+def test_money_at_risk_triggers_alert_when_cap_breach():
+    cur = _period_with_tier2(house_comped=0, foregone=0.0)
+    cur.promoter_caps = [
+        PromoterCapResult(
+            key="thu_afrikan", day="Thursday", event="Afrikan",
+            poc="Kelvin", cap=2, cap_type="external",
+            bottle_count=3, bottle_dollars=132.0,
+        )
+    ]
+    prev = _period_with_tier2(0, 0.0)
+    msg, is_alert = build_weekly_slack_message(cur, prev)
+    assert is_alert is True
+    assert "cap breach" in msg.lower() or "clawback" in msg.lower()
+
+
+def test_money_at_risk_shows_foregone_in_headline():
+    cur = _period_with_tier2(house_comped=3, foregone=1962.0)
+    prev = _period_with_tier2(0, 0.0)
+    msg, _ = build_weekly_slack_message(cur, prev)
+    assert "MONEY AT RISK" in msg
+    assert "1,962" in msg
+    assert "foregone" in msg.lower()
+
+
+def test_money_at_risk_uncategorized_over_threshold_triggers_alert():
+    cur = CompPeriod(label="w", start="s", end="e",
+                     net_sales=100_000.0, total_comp=UNCATEGORIZED_ALERT_THRESHOLD + 100)
+    cur.by_bucket = {"uncategorized_open_dollar": UNCATEGORIZED_ALERT_THRESHOLD + 100}
+    cur.by_bucket_count = {"uncategorized_open_dollar": 3}
+    prev = CompPeriod(label="w", start="s", end="e",
+                      net_sales=100_000.0, total_comp=0.0)
+    msg, is_alert = build_weekly_slack_message(cur, prev)
+    assert is_alert is True
+    assert "uncategorized" in msg.lower()
+
+
+def test_money_at_risk_clawback_uses_avg_tier_1_retail_constant():
+    # Cap breach of 2 bottles external → clawback = 2 * 0.8 * AVG_TIER_1_RETAIL
+    cur = _period_with_tier2(0, 0.0)
+    cur.promoter_caps = [
+        PromoterCapResult(
+            key="thu_afrikan", day="Thursday", event="Afrikan",
+            poc="Kelvin", cap=2, cap_type="external",
+            bottle_count=4, bottle_dollars=800.0,  # +2 over cap
+        )
+    ]
+    prev = _period_with_tier2(0, 0.0)
+    msg, _ = build_weekly_slack_message(cur, prev)
+    expected_clawback = 2 * 0.8 * AVG_TIER_1_RETAIL  # e.g. 480 at $300 avg
+    assert f"{expected_clawback:,.0f}" in msg
+
+
+# ── Retail price lookup ────────────────────────────────────────────
+
+def test_get_retail_price_tier2_direct():
+    assert get_retail_price("BTL Don Julio 1942") == 693.0
+    assert get_retail_price("Ace BTL") == 654.0
+
+
+def test_get_retail_price_owner_sku_resolves_to_retail():
+    # OWNER ACE → Ace BTL retail
+    assert get_retail_price("OWNER ACE") == 654.0
+    # OWNER MOET ROSE → Moet Rose Nectar BTL
+    assert get_retail_price("OWNER MOET ROSE") == 297.0
+    # OWNER DON REPO → BTL Don Julio Repo
+    assert get_retail_price("OWNER DON REPO") == 346.0
+
+
+def test_get_retail_price_dollar_prefix_resolves():
+    # $-prefix cost-basis SKUs → magnum retail
+    assert get_retail_price("$1942 BTL") == 1309.0
+    assert get_retail_price("$Ace BTL") == 1155.0
+
+
+def test_get_retail_price_unknown_returns_none():
+    assert get_retail_price("Chicken Wings") is None
+    assert get_retail_price(None) is None
+    assert get_retail_price("Unknown Bottle") is None
+
+
+# ── Named constants ────────────────────────────────────────────────
+
+def test_uncategorized_alert_threshold_is_positive():
+    assert UNCATEGORIZED_ALERT_THRESHOLD > 0
+
+
+def test_avg_tier_1_retail_below_tier2_cutoff():
+    # Sanity: avg Tier 1 must be under the Tier 2 threshold ($500)
+    assert AVG_TIER_1_RETAIL < 500.0
+
+
+def test_owner_sku_to_retail_covers_common_owners():
+    for sku in ("OWNER ACE", "OWNER DON REPO", "OWNER MOET ROSE",
+                "OWNER KETEL ONE", "OWNER HENNESSY"):
+        assert sku in OWNER_SKU_TO_RETAIL, f"missing {sku} in OWNER_SKU_TO_RETAIL"
