@@ -1552,22 +1552,108 @@ def build_weekly_slack_message(cur: CompPeriod, prev: CompPeriod) -> Tuple[str, 
 
 
 def send_weekly_comp_report(analytics: Optional[CompAnalytics] = None) -> Dict:
-    """Compute last completed week's comp performance and post to Slack.
+    """Compute last completed week's comp performance, post to Slack, email v8 PDF.
 
     Called by Cloud Scheduler (Tue 9 AM CT) and on demand via /api/comp-report.
+
+    Distribution:
+    - Slack — SLACK_REPORT_WEBHOOK (leadership channel) fallback SLACK_WEBHOOK_URL
+    - Email — COMP_REPORT_EMAIL_TO env var (comma-separated), default
+      "maurice.ragland@lov3htx.com" so nothing goes to broader leadership
+      without an explicit env update.
+
+    Email delivery is best-effort — a Resend failure is logged but does not
+    fail the endpoint (Slack has already fired).
     """
     from services import AlertManager
+    import logging
     import os
+
+    logger = logging.getLogger(__name__)
 
     analytics = analytics or CompAnalytics()
     cur = analytics.compute_last_week()
     prev = analytics.compute_prior_week()
 
     msg, is_error = build_weekly_slack_message(cur, prev)
-    # Prefer SLACK_REPORT_WEBHOOK (leadership channel); fall back to alerts webhook.
     webhook = os.environ.get("SLACK_REPORT_WEBHOOK") or ALERT_WEBHOOK_URL
     alert = AlertManager(slack_webhook=webhook)
     alert.send_slack_alert(msg, is_error=is_error)
+
+    email_result = {"attempted": False, "sent": False, "error": None}
+    to_env = os.environ.get("COMP_REPORT_EMAIL_TO", "maurice.ragland@lov3htx.com")
+    recipients = [addr.strip() for addr in to_env.split(",") if addr.strip()]
+
+    if recipients:
+        email_result["attempted"] = True
+        try:
+            import base64
+            import requests
+            from comp_report_pdf import (
+                BirthdayReconciliation, MANAGERS,
+                fetch_lp_voids, fetch_bottle_manager_audit, fetch_approver_pairs,
+                fetch_reason_item_mismatches, fetch_manager_behavior,
+                fetch_daypart_split, fetch_4wk_trend, build_pdf as build_comp_pdf,
+                last_completed_week, _get_secret,
+                RESEND_ENDPOINT, RESEND_FROM,
+            )
+
+            label, s, e = last_completed_week()
+            recon = BirthdayReconciliation(analytics.bq).reconcile(s, e)
+            lp_voids = fetch_lp_voids(analytics.bq, s, e)
+            bm_audit = fetch_bottle_manager_audit(analytics.bq, s, e)
+            approver_pairs = fetch_approver_pairs(analytics.bq, e, lookback_days=90)
+            reason_mismatches = fetch_reason_item_mismatches(analytics.bq, s, e)
+            behaviors = {n: fetch_manager_behavior(analytics.bq, cur, n) for n in MANAGERS}
+            dayparts = fetch_daypart_split(analytics.bq, s, e)
+            trend = fetch_4wk_trend(analytics, e, weeks_back=4)
+
+            pdf = build_comp_pdf(cur, prev, recon, lp_voids, bm_audit,
+                                 approver_pairs, reason_mismatches, behaviors,
+                                 dayparts, trend)
+
+            api_key = _get_secret("resend-api-key")
+            resp = requests.post(
+                RESEND_ENDPOINT,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "from": RESEND_FROM,
+                    "to": recipients,
+                    "subject": f"LOV3|HTX Weekly Comp Discipline Report — {label}",
+                    "html": (
+                        f"<div style='font-family:-apple-system,BlinkMacSystemFont,sans-serif;"
+                        f"max-width:640px;color:#111'>"
+                        f"<p>Week of <b>{label}</b>:</p>"
+                        f"<ul>"
+                        f"<li>Blended: <b>{cur.total_pct:.2f}%</b> of gross</li>"
+                        f"<li>Manager Discretionary: <b>{cur.manager_disc_pct:.2f}%</b></li>"
+                        f"<li>Recovery: <b>{cur.recovery_pct:.2f}%</b></li>"
+                        f"</ul>"
+                        f"<p>Full PDF report attached.</p>"
+                        f"<p style='color:#6a6a6a;font-size:12px'>— LOV3 Analytics · "
+                        f"Confidential — For Leadership Only</p>"
+                        f"</div>"
+                    ),
+                    "text": f"Week of {label}: blended {cur.total_pct:.2f}%. See attached PDF.",
+                    "attachments": [{
+                        "filename": f"LOV3_Comp_Report_{s}_to_{e}.pdf",
+                        "content": base64.b64encode(pdf).decode("ascii"),
+                    }],
+                },
+                timeout=60,
+            )
+            resp.raise_for_status()
+            email_result["sent"] = True
+            email_result["resend_id"] = resp.json().get("id")
+            email_result["pdf_bytes"] = len(pdf)
+            email_result["recipients"] = recipients
+            logger.info(
+                f"Comp report v8 emailed — Resend id={email_result['resend_id']} "
+                f"to {recipients} ({len(pdf):,} bytes)"
+            )
+        except Exception as exc:
+            email_result["error"] = str(exc)
+            logger.error(f"Comp report email failed: {exc}", exc_info=True)
 
     return {
         "status": "success",
@@ -1578,6 +1664,7 @@ def send_weekly_comp_report(analytics: Optional[CompAnalytics] = None) -> Dict:
         "discretionary_pct": round(cur.discretionary_pct, 2),
         "flagged_count": len(cur.flagged),
         "alerted": is_error,
+        "email": email_result,
     }
 
 
