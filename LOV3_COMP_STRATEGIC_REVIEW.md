@@ -1,11 +1,15 @@
 # LOV3 Comp Discipline — Strategic Review & Recommendations
 
-**Prepared for:** LOV3 Leadership Team (Maurice · Eddie · Derwin · Tiffany · Tony · Daja · Ashley)
+**Prepared for:** LOV3 Leadership Team (Maurice · Eddie Jasper · Derwin James Jr. · Tiffany · Tony · Daja · Ashley)
 **Prepared by:** Executive Committee (Analytics + 9 domain experts across 2 review rounds)
 **Date:** 2026-07-31
-**Version:** 2.0 · Confidential — For Leadership Only
+**Version:** 2.1 · Confidential — For Leadership Only
 
-**Recent update (2026-07-31):** Ashley Baines formally reclassified from Bar Lead to Manager based on duties (approving Manager Comp checks up to $488 = manager-level authority per audit). This document reflects Ashley as a Manager throughout. Her manager KPIs are now benchmarked against the peer cohort (Tiffany · Tony · Daja).
+**Revision note (v2.1, 2026-07-31):**
+1. **Ashley Baines role clarification** — Ashley remains Bar Lead. Based on her expanded duties (approving Manager Comp checks up to $488), her comp-approval authority is managerial. Scorecard tracks both her Bar Lead peer trend AND her Manager peer-cohort benchmarks (Tiffany · Tony · Daja). Formal title stays Bar Lead.
+2. **"Confirmed fraud" language removed throughout.** All previously-flagged incidents (India Thomas same-minute voids, service-account voider, Maker's Mark spillage, approver-server pair concentration) are now framed as **LP pattern signals under review — not confirmed fraud.** None have been investigated to conclusion. Section 9 (new — LP Pattern Field Guide) explains each pattern, what LPs look for, how to spot it, and how to address it before assuming intent.
+3. **VIC3 target open: November 2026.** All hardening opportunities must be complete well before doors open.
+4. **Recovery estimates now discounted at 65%** per consulting review (100% recovery is not a defensible assumption).
 
 ---
 
@@ -13,9 +17,9 @@
 
 Over 8 days and 7 iterations of the weekly comp discipline report, we conducted a full audit of LOV3's discount, void, and comp operating model — using 90 days of live Toast POS + SevenRooms data, cross-referenced against nine expert reviews from CFO / COO / Loss Prevention / Hospitality Industry Consultant / Growth Strategist perspectives.
 
-**Bottom line:** LOV3 has an **operator-grade** comp system (B+ if benchmarked against independent restaurants) but is **not investor-grade or franchise-grade.** In its current form, it is a cautionary tale, not a template. If we transfer this operating model to VIC3 without hardening, we will import LOV3's bad habits by copy-paste — costing an estimated **$3-5K/week per venue** in unattributable leakage, plus catastrophic tail risk from confirmed fraud patterns.
+**Bottom line:** LOV3 has an **operator-grade** comp system (B+ if benchmarked against independent restaurants) but is **not investor-grade or franchise-grade.** In its current form, it is a cautionary tale, not a template. If we transfer this operating model to VIC3 (target November 2026 open) without hardening, we will import LOV3's bad habits by copy-paste — costing an estimated **$3-5K/week per venue** in unattributable leakage, plus elevated tail risk from unresolved LP pattern signals.
 
-**The good news:** the policy framework is 80% written; the automation stack is 60% built. Six weeks of disciplined execution converts LOV3 from cautionary tale into template.
+**The good news:** the policy framework is 80% written; the automation stack is 60% built. The window from now to VIC3's November open is ~16 weeks — more than enough to harden every control described here, provided execution starts this sprint.
 
 ---
 
@@ -34,19 +38,19 @@ Over 8 days and 7 iterations of the weekly comp discipline report, we conducted 
 
 ### 🔴 Weaknesses
 
-- **Role-vs-duty misalignment (historical)** — Ashley Baines was titled Bar Lead while functioning as a manager (approving $488 Manager Comp checks). Now reclassified to Manager as of 2026-07-31; org chart, Toast permissions, and scorecard peer group updated. Future weakness prevention: any employee approving Manager Comps ≥ $150 must carry a Manager title on the formal roster.
+- **Role-vs-duty alignment** — Ashley Baines carries Bar Lead title with expanded managerial authority (approves Manager Comp checks up to $488). Her scorecard now runs against BOTH the Bar Lead trend AND the Manager peer cohort so we can see the full picture. Future prevention control: any employee approving Manager Comps ≥$150 gets a formal role-authority tag on the roster (title or explicit "with managerial authority" designation) so accountability is unambiguous.
 - **Anthony Winn 1/4 reason-code diversity** — every comp lands in "Manager Comp" bucket, category laziness that masks intent
 - **Bottle Manager station is anonymous** — $7,991 in 90 days with zero accountability
-- **Tab-naming inconsistency** — Ashley's `Fri Bday`, `Sat Bday`, `Fridaay Bday`, `Saturday Bday` variants destroyed 60 days of reconciliation
+- **Tab-naming inconsistency** — `Fri Bday`, `Sat Bday`, `Fridaay Bday`, `Saturday Bday` variants (originated at the bar; Ashley is the closest owner) destroyed 60 days of reconciliation. Now a tracked KPI.
 - **Owner Comp button not PIN-locked** — anyone with a login can press it
-- **Bar cost-basis substitute pattern** — OWNER MOET rung at cost when policy says birthday package = fully comped Bellaire
+- **Cost-basis SKU substitution pattern** — OWNER MOET rung at cost when policy says birthday package = fully comped Bellaire. Not fraud — it corrupts revenue reporting and understates the actual comp economics. See Pattern 5 in the LP Field Guide (§9).
 - **Reason code laziness dominant** — most managers use generic "Manager Comp - Check (100%)"; specific codes rarely applied
 - **Cost-basis SKUs (OWNER MOET ROSE et al.) corrupt revenue reporting** — dual accounting forever
 - **Guest name field empty on Toast checks** — buddy-comping the same regular weekly is currently undetectable
-- **Confirmed self-approved cash voids** — India Thomas $375 + $1,358 same-minute voids
-- **Confirmed service-account voider** — UUID email address used to void $2,296 in 90 days
-- **Confirmed reason-code abuse** — "Spillage" used on sealed Maker's Mark bottle (bottles can't spill)
-- **Confirmed approver-server collusion signals** — Tony Winn concentrates 7 of top 15 pairs
+- **LP pattern signal — same-minute cash voids (under review)** — India Thomas $375 + $1,358 same-minute voids over 90 days. Fits the classic same-user self-void pattern; no confirmation of intent. Investigation steps in §9 Pattern 1.
+- **LP pattern signal — anonymous voider (under review)** — UUID email address (`4379fdda-...@example.com`) tied to $2,296 in voids over 90 days. Likely a shared workstation or Toast integration; needs Toast rep call to identify. §9 Pattern 2.
+- **LP pattern signal — reason-code semantic mismatch (under review)** — "Spillage" reason code applied to sealed Maker's Mark bottle. Almost certainly reason-code laziness rather than intent, but the signal warrants a look. §9 Pattern 3.
+- **LP pattern signal — approver-server pair concentration (under review)** — Tony Winn concentrates 7 of top 15 pairs. Multiple benign explanations possible (most shifts worked, on-duty manager on busy nights, servers' default approver). Concentration is the population LPs watch, not proof of collusion. §9 Pattern 4.
 
 ### 🔵 Opportunities
 
@@ -65,12 +69,12 @@ Over 8 days and 7 iterations of the weekly comp discipline report, we conducted 
 
 ### 🚨 Threats
 
-- **Confirmed fraud patterns already active** — Maker's Mark spillage, India same-minute cash voids, service-account voider. Every week these go undetected compounds the loss.
+- **Unresolved LP pattern signals** — Maker's Mark reason-code mismatch, India same-minute cash voids, anonymous voider account. Each week these go un-investigated, the pattern accumulates and the eventual review gets harder. **None are confirmed fraud** — each is a well-known LP pattern that warrants a look. See §9 for the field guide.
 - **Manager transfer risk to VIC3** — if Tony carries the 1/4 reason-code habit or the approver-of-last-resort role to VIC3, we import LOV3's data debt on day 1 with no audit trail
 - **Cost of delay** — ~$3-5K/wk at LOV3 alone; $6-10K/wk once VIC3 opens without hardened controls
-- **Regulatory exposure** — if we ever pursue franchise, private equity, or a lender, unaddressed self-approved cash voids and reason-code fraud are audit findings
+- **Regulatory/underwriter exposure** — if we pursue franchise, private equity, or a lender, unaddressed LP pattern signals become audit findings even if none are ever confirmed as fraud. Underwriters treat "unresolved" the same as "confirmed" until the file shows an investigation trail.
 - **Cultural normalization of leakage** — 60% of birthday-package pre-registrations went undelivered over 60 days ($6,542 in undelivered obligations). If this becomes the norm, we lose the birthday reservation category to a competitor
-- **Ownership rotation risk** — if key managers depart without documented SOPs, tribal knowledge (Michelle's Wed pattern, Ashley's Fri/Sat OWNER MOET pattern) walks out the door
+- **Ownership rotation risk** — if key managers depart without documented SOPs, tribal knowledge (Michelle's Wed pattern, the Fri/Sat OWNER MOET delivery pattern owned by the bar) walks out the door
 - **Brand risk from ghost birthdays** — a party who paid $600, spent the entire birthday at LOV3, and received nothing branded as a package is a bad social media post waiting to happen
 
 ---
@@ -164,7 +168,7 @@ LOV3 at 3.3% over 90 days is **3x the target**. Not because managers are corrupt
 | Owner Comp PIN | Unlocked | PIN + Slack notify wired | Unbounded — 1 bad night = $2K+ |
 | Bottle Manager station | Anonymous | Named role, scheduled rotation | ~$800-1,200/wk unassignable |
 | Tab naming | Free-text, inconsistent | POS-enforced dropdown or manager gate | ~$1,500-2,500/wk unattributable |
-| Role-vs-duty alignment | Ashley approved $488 Manager Comps as Bar Lead (title-duty mismatch) | Every employee approving Manager Comps ≥$150 titled Manager on formal roster; org chart enforced at hire | Loss of manager gate-keeping; ambiguous accountability |
+| Role-authority alignment | Bar Lead with expanded managerial authority (Ashley model — Bar Lead title + $488 comp-approval authority) | Every employee approving Manager Comps ≥$150 gets an explicit role-authority tag on the roster: either titled Manager OR titled Lead-with-managerial-authority. Toast permissions match the tag. Peer scorecard covers both trend lines. | Ambiguous accountability; missed coaching opportunities |
 | Reason-code taxonomy | Grandfathered "Manager Comp" default | 15-code taxonomy pre-loaded | Category collapse; report loses meaning |
 | OWNER-SKU vs retail | Cost-basis SKUs corrupt revenue | Retail SKUs + discount codes only | Dual accounting forever |
 | Guest name on tabs | Empty | Required on tabs receiving ≥$100 comp | Buddy-comping undetectable |
@@ -274,7 +278,7 @@ Before VIC3 opens, these MUST be hardened at LOV3 first so the template is clean
 
 1. **PIN + reason code required at every comp ring** — no exceptions
 2. **Named Bottle Manager per shift on the schedule** — kill the anonymous station
-3. **Role-title enforcement** — anyone approving Manager Comps ≥$150 must be titled Manager on the formal roster before opening day; POS permissions matched to org chart
+3. **Role-authority enforcement** — anyone approving Manager Comps ≥$150 carries an explicit authority tag on the formal roster before opening day (titled Manager OR titled Lead-with-managerial-authority). POS permissions matched to the tag. No implicit authority.
 4. **Guest name required on tab** for any check receiving ≥$100 comp — enables detection
 5. **15-code reason taxonomy pre-loaded in Toast** — the generic "Manager Comp" default is deleted
 6. **Retail SKUs only for daily menu** — OWNER-prefixed SKUs kept for owner-personal only; not for program delivery
@@ -289,50 +293,54 @@ Before VIC3 opens, these MUST be hardened at LOV3 first so the template is clean
 
 ### Cost of Doing Nothing (per week, per venue)
 
-| Category | Weekly Burn |
-|---|---|
-| Tab-naming non-adoption | $1,500-2,500 |
-| Owner Comp unlocked | Unbounded (1 bad night = $2K+) |
-| Bottle Manager anonymity | $800-1,200 |
-| Ashley cost-basis pattern | $400-600 |
-| Confirmed fraud (India, Maker's Mark, service-account) | Compounding weekly |
-| **Total known + probable** | **$3,000-5,000/week** |
-| **Annualized at LOV3 alone** | **$156K-260K/year** |
-| **Post-VIC3-open (2 venues, unhardened)** | **$312K-520K/year** |
-
-### Expected Recovery from Full Implementation
-
-| Category | Weekly Recovery | Annualized |
+| Category | Weekly Burn | Basis |
 |---|---|---|
-| Blended comp % tightening 5.3% → 4% | ~$1,000 | $52,000 |
-| Manager Discretionary category enforcement 3.3% → 1% | ~$1,500 | $78,000 |
-| Uncategorized elimination | ~$100 | $5,200 |
-| Fraud detection at scale | ~$500-1,000 | $26,000-52,000 |
-| Birthday attach rate 40% → 80% | Revenue upside via retention | $50,000+ |
-| Comp ROI tracking | Revenue upside | $30,000+ |
-| **Total per venue** | **~$3,100-4,600/week** | **~$240K-270K/year** |
+| Tab-naming non-adoption | $1,500-2,500 | Estimated leakage from unattributable comp $ over 90-day observation |
+| Owner Comp unlocked | Unbounded (1 bad night = $2K+) | Structural — single-press exposure |
+| Bottle Manager anonymity | $800-1,200 | Estimated from 90-day station rings ($7,991 / 13 wks ≈ $615/wk floor; upside from LP dispersion) |
+| Cost-basis SKU substitution | $400-600 | Revenue-reporting distortion, not cash loss |
+| LP pattern signals (India, Maker's Mark, anonymous voider) — under review | Compounding weekly if not investigated | Not confirmed loss — carrying cost of unresolved review |
+| **Total estimated + observed** | **$3,000-5,000/week** | Directional; requires signed methodology appendix for lender use |
+| **Annualized at LOV3 alone** | **$156K-260K/year** | |
+| **Post-VIC3-open (2 venues, unhardened)** | **$312K-520K/year** | |
 
-**LOV3 alone: ~$240-270K/yr recovery + eliminated fraud.**
-**Both venues after VIC3 opens: ~$480-540K/yr.**
+### Expected Recovery from Full Implementation (with 65% realization factor)
 
-**6-week investment to build the multi-venue infrastructure: ~$40K in delayed revenue + development effort.**
+Consulting review noted 100% recovery is not a defensible assumption. All lever-level recovery figures below are discounted at 65% to reflect real-world adoption drag, edge-case exceptions, and partial-quarter ramp.
+
+| Category | Weekly Recovery (gross) | Annualized (gross) | @ 65% realization |
+|---|---|---|---|
+| Blended comp % tightening 5.3% → 4% | ~$1,000 | $52,000 | **$33,800** |
+| Manager Discretionary category enforcement 3.3% → 1% | ~$1,500 | $78,000 | **$50,700** |
+| Uncategorized elimination | ~$100 | $5,200 | **$3,380** |
+| LP pattern signal resolution + prevention controls | ~$500-1,000 | $26,000-52,000 | **$16,900-33,800** |
+| Birthday attach rate 40% → 80% | Revenue upside via retention | $50,000+ | **$32,500+** |
+| Comp ROI tracking | Revenue upside | $30,000+ | **$19,500+** |
+| **Total per venue** | **~$3,100-4,600/week** | **~$240K-270K/year gross** | **~$156K-175K/year realized** |
+
+**LOV3 alone: ~$156-175K/yr realized recovery.**
+**Both venues after VIC3 opens (November 2026): ~$312-350K/yr realized.**
+
+**Investment to build multi-venue infrastructure: ~$40K in development effort + deferred revenue during hardening sprints. Payback ≈ 3-4 months at LOV3-only; ≈ 6-8 weeks once VIC3 goes live.**
 
 ---
 
-## 8. 90-Day Execution Roadmap
+## 8. Execution Roadmap — Anchored to VIC3 November 2026 Open
 
-### 30 Days — Immediate Controls
+**Countdown:** ~16 weeks from 2026-07-31 to a November open. All items below must land before VIC3 doors open so the template is clean at launch.
 
-- [ ] India Thomas cash-drawer review + camera pull (owner action)
-- [ ] Toast rep call to identify anonymous voider (`4379fdda-...@example.com`)
-- [ ] Ashley Baines formal Manager title update (org chart + Toast permissions + peer scorecard onboarding)
-- [ ] Tony Winn / Jordyn Aiken 90-day pattern conversation (leadership)
-- [ ] Maker's Mark spillage inventory tie-out (LP + inventory manager)
+### 30 Days — Immediate Controls (target: end of August 2026)
+
+- [ ] India Thomas 1:1 — walk through each same-minute void, hear the explanation (owner action, non-accusatory)
+- [ ] Toast rep call to identify anonymous voider (`4379fdda-...@example.com`) — likely shared workstation / integration
+- [ ] Ashley Baines role-authority tag update — Bar Lead with Managerial Authority. Toast permissions + peer scorecard onboarding (dual trend: Bar Lead peer + Manager peer cohort)
+- [ ] Tony Winn 1:1 — socialize the 3.3% → 1% Manager Discretionary cap AND the approver-server pair rotation plan (leadership)
+- [ ] Maker's Mark event review — was the bottle broken, comped, or missing? Reason-code retraining follow-up
 - [ ] Deploy Bday-{D}-{Name} tab naming (Sprint 2 rollout)
 - [ ] Print + laminate POS cheat sheet at every station
 - [ ] Reason code enforcement training for Anthony Winn (§11)
 
-### 60 Days — Structural
+### 60 Days — Structural (target: end of September 2026)
 
 - [ ] Owner Comp PIN + Slack notification live
 - [ ] Named Bottle Manager role on schedule
@@ -342,8 +350,9 @@ Before VIC3 opens, these MUST be hardened at LOV3 first so the template is clean
 - [ ] Michelle's Wed Bellaire pattern replicated to Fri/Sat/Sun
 - [ ] Comp Budget Envelope framework implemented per bucket
 - [ ] Manager quarterly recognition ceremony launched
+- [ ] All LP pattern signals from §9 investigated to conclusion (documented investigation trail — critical for underwriter file)
 
-### 90 Days — Strategic
+### 90 Days — Strategic (target: end of October 2026 — pre-VIC3-open)
 
 - [ ] Comp ROI (30-day return rate) tracking live
 - [ ] Daypart economics reporting (bottle vs food)
@@ -354,18 +363,169 @@ Before VIC3 opens, these MUST be hardened at LOV3 first so the template is clean
 - [ ] VIC3 SOP package documented and signed off
 - [ ] LOV3 → VIC3 manager transfer safeguards defined
 
+### VIC3 Open — November 2026
+
+- [ ] All §6 Day-1 Non-Negotiables verified in production
+- [ ] Tuesday comp report LIVE from VIC3 week 1
+- [ ] LOV3 baseline comp KPIs used as VIC3 targets (no re-baseline until Q1 2027)
+
 ---
 
-## 9. Signoff
+## 9. LP Pattern Field Guide — What Leaders Should Watch For
+
+**None of the patterns below are confirmed fraud.** They are pattern shapes that Loss Prevention professionals monitor because they are the pathways through which loss most often occurs. A pattern signal warrants investigation — not accusation. Some signals turn out to be benign operational quirks; the discipline is running the investigation trail so we know either way.
+
+Every entry follows the same structure so leaders can use this doc as a working reference during shift reviews.
+
+---
+
+### Pattern 1 — Same-Minute Self-Void (Cash Skim Shape)
+
+**What it looks like:** A server rings a cash payment, then the same user (or the same server acting as void_user) voids it within ~60 seconds.
+**Observed at LOV3:** India Thomas — 2 events totaling $1,733 over 90 days.
+**Why LPs watch it:** Classic cash-skim mechanic — ring the sale, take the cash, void the transaction, keep the cash. The signal alone doesn't prove skimming. Benign explanations: guest changed mind, ring error, training-in-progress correction.
+**How to spot it in the wild:** Any Toast void report where `user = void_user` AND the void happens within a minute of the payment AND payment type = cash or "Other."
+**How to address:**
+1. Pull the specific check details for each event
+2. Sit with the server (non-accusatory) — walk through what happened each time
+3. If explanation holds → coaching moment on Void-Manager-Approval workflow
+4. If explanation gaps → LP review + camera pull
+5. **Preventive control:** Toast setting → server cannot void their own payment; requires manager PIN
+
+---
+
+### Pattern 2 — Anonymous or Service-Account Voider
+
+**What it looks like:** Void records where `void_user` is a UUID email (e.g., `4379fdda-....@example.com`), not a named employee.
+**Observed at LOV3:** $2,296 voided by a UUID service account over 90 days.
+**Why LPs watch it:** Anonymous voider = zero accountability. No name = no coaching = no learning. Usually a Toast configuration issue (shared workstation, integration account), not intentional evasion.
+**How to spot it in the wild:** Query voids by `void_user`; anything that's not a real employee record is a lookalike.
+**How to address:**
+1. Toast rep call — identify what this account actually is
+2. If shared workstation → require personal login for voids
+3. If integration → tag as "system-generated," exclude from scorecards
+4. **Preventive control:** every void requires an authenticated named user
+
+---
+
+### Pattern 3 — Reason-Code Semantic Mismatch
+
+**What it looks like:** A reason code that doesn't fit the item. Example: "Spillage" applied to sealed bottles or packaged items.
+**Observed at LOV3:** Maker's Mark bottle voided under "Spillage."
+**Why LPs watch it:** Wrong reason code hides real intent. Sealed bottles don't spill — they get broken, comped, or go missing. Reason-code drift is the #1 mask for inventory shrink. Usually laziness, not fraud.
+**How to spot it in the wild:** Cross-reference reason codes vs item categories. Spillage on draft/cocktail/wine-by-glass = plausible. Spillage on bottled/packaged = mismatch.
+**How to address:**
+1. Pull the event details — was the bottle broken? Comped? Missing?
+2. Retrain: "Spillage" = liquid; "Bottle Broke" = breakage; "Recovery — Guest" = comp-away
+3. **Preventive control:** POS restricts "Spillage" to spill-eligible categories only
+
+---
+
+### Pattern 4 — Approver-Server Pair Concentration
+
+**What it looks like:** One manager repeatedly signs off comps for the same handful of servers — high pair concentration in a 90-day window.
+**Observed at LOV3:** Tony Winn concentrates 7 of top 15 pairs. Benign explanations dominate: he works the most shifts, he's the on-duty manager on the busiest nights, servers may default to him for approvals.
+**Why LPs watch it:** Not because concentration = collusion, but because collusion patterns show up as concentration. High-concentration pairs are the population where buddy-comping, quid-pro-quo, or preferential approvals can incubate.
+**How to spot it in the wild:** 90-day pivot: approver × server, count of approvals per pair. Anything > 15% of a manager's approvals going to one server is a look.
+**How to address:**
+1. Rotate manager coverage so each server sees ≥2 approver managers per week
+2. Post the approver-server heatmap in the weekly report — visibility alone corrects behavior
+3. If a pair exceeds threshold → other managers get first shot at that server's approvals for a month
+4. **Preventive control:** POS randomizes eligible approver from all clocked-in managers
+
+---
+
+### Pattern 5 — Cost-Basis SKU Substitution
+
+**What it looks like:** Item rung using the cost-basis OWNER-prefixed SKU instead of the retail SKU, on tabs where policy calls for full retail comp.
+**Observed at LOV3:** OWNER MOET ROSE rung at cost on birthday-package tabs where policy calls for fully-comped Bellaire at retail.
+**Why LPs watch it:** Corrupts revenue reporting. Comping a $250 retail bottle via the $80 cost SKU records $80 in comp when the true economics are $250. Systematically understates comp %, overstates revenue. Not fraud — accounting distortion.
+**How to spot it in the wild:** Tabs typed as Birthday/VIP/Programmatic that ring OWNER-prefixed SKUs = mismatch.
+**How to address:**
+1. Retrain: "Birthday Package = retail Bellaire + Birthday Package discount code"
+2. OWNER SKUs stay in menu for owner personal / owner-directed cost-basis rings
+3. **Preventive control:** POS restricts OWNER SKUs to Maurice / Eddie / Derwin / Per Maurice / Owner Tasting tabs
+
+---
+
+### Pattern 6 — Late-Shift Comping
+
+**What it looks like:** Disproportionate share of a server's or manager's comps happen within the last hour of their shift.
+**Observed at LOV3:** Not yet measured. Adding to weekly report v9.
+**Why LPs watch it:** Highest-risk skim window — managers tired and rubber-stamping, other managers gone home, lower volume masks anomalies. Classic skim pathway in every LP textbook.
+**How to spot it in the wild:** Bin comps by hour-relative-to-shift-end; compare last-hour density to average.
+**How to address:**
+1. Publish the last-hour comp density weekly
+2. Any late-shift comp ≥$100 requires a real-time Slack from the approving manager to ownership
+3. **Preventive control:** POS blocks last-hour comps above threshold without owner approval
+
+---
+
+### Pattern 7 — Buddy-Comping (Guest × Server × Cadence)
+
+**What it looks like:** Same server comps the same guest weekly or more, often at similar dollar amounts.
+**Observed at LOV3:** Currently undetectable — Toast Guest Name field is not required. One of the top three data-gap risks.
+**Why LPs watch it:** Comp becomes a personal favor rather than a business investment. Guest keeps coming back because comp is guaranteed; server gets higher tips in exchange for higher comps. Venue subsidizes a private relationship.
+**How to spot it in the wild:** Requires Guest Name field first. Then monthly pivot (guest × server × comp $); 4+ occurrences with same server = look.
+**How to address:**
+1. Legitimate: guest is documented VIP → move to VIP list + monthly cap
+2. Not legitimate: coaching + require a different manager to approve future comps
+3. **Preventive control:** Guest Name required on ≥$100 comp tabs; VIP list separate + capped
+
+---
+
+### Pattern 8 — Reason-Code Monoculture
+
+**What it looks like:** One manager funnels every comp into "Manager Comp — Discretionary" regardless of the actual reason.
+**Observed at LOV3:** Anthony Winn — 1/4 buckets used across 90 days.
+**Why LPs watch it:** Monoculture masks intent — everything looks like judgment even when 30%+ is actually kitchen recovery, promoter fulfillment, or owner-directed hospitality. Not fraud — reporting equivalent of writing every check to "Miscellaneous."
+**How to spot it in the wild:** Per-manager, count distinct reason codes over 90 days; flag anything < 3.
+**How to address:**
+1. Pre-shift training on the 15-code taxonomy
+2. Publish diversity metric weekly
+3. Ownership 1:1 with any manager still ≤2 codes after 30 days
+4. **Preventive control:** POS blocks generic "Manager Comp" as a fallback; requires a specific code
+
+---
+
+### Pattern 9 — Owner Comp Button Unlocked
+
+**What it looks like:** No PIN required on the highest-authority comp button in the POS.
+**Observed at LOV3:** Owner Comp pressable by any logged-in user.
+**Why LPs watch it:** Highest-authority button = highest potential loss per press. No signal fires until it's already spent.
+**How to address:**
+1. PIN-lock Owner Comp — only Maurice / Eddie / Derwin PINs accept
+2. Every Owner Comp use fires a Slack to ownership at ring-time (tab name + amount)
+3. Ownership can flag "not my guest" within 24 hours — becomes a coaching conversation
+
+---
+
+### Pattern 10 — Anonymous Station (Bottle Manager)
+
+**What it looks like:** A POS station generates substantial revenue but "who ran the station tonight?" has no answer.
+**Observed at LOV3:** Bottle Manager station rang $7,991 over 90 days with no scheduled person owning it.
+**Why LPs watch it:** Anonymity = zero accountability. Cannot coach or compliment the person because no one is named.
+**How to address:**
+1. Add "Bottle Manager" to the weekly schedule as a named role, rotating shift-by-shift
+2. The scheduled person wears accountability for that station's rings that night
+3. Preserves pooling economics (revenue still pools to waitstaff); adds accountability
+
+---
+
+**Leader's shift-review one-liner:** at end of shift, ask "did anything look like Patterns 1–10?" If yes, walk it through the "How to address" steps *before* forming a conclusion. Documented investigation trail matters more than the specific finding — an underwriter reviewing the file needs to see we look, not just that we found nothing.
+
+---
+
+## 10. Signoff
 
 This document represents the consensus recommendation of a 9-agent executive committee based on 90 days of live LOV3 operational data. Each finding is grounded in specific transaction evidence and cross-verified against published industry standards from USHG, TAO, Mina Group, and Cornell School of Hotel Administration.
 
 - [ ] Maurice Ragland (Owner) — ______________
-- [ ] Eddie ______________ (Owner) — ______________
-- [ ] Derwin ______________ (Owner) — ______________
+- [ ] Eddie Jasper (Owner) — ______________
+- [ ] Derwin James Jr. (Owner) — ______________
 - [ ] Tiffany Loving (General Manager) — ______________
 - [ ] Anthony Winn (Manager) — ______________
 - [ ] Dajah Bishop (Shift Manager) — ______________
-- [ ] Ashley Baines (Manager) — ______________
+- [ ] Ashley Baines (Bar Lead with Managerial Authority) — ______________
 
 *This document supersedes prior comp policy language where conflicting. Revisions require full leadership review.*

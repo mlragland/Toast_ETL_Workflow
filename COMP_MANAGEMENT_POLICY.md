@@ -1,9 +1,11 @@
 # LOV3 Comp Management Policy
 
-**Version:** 1.0 DRAFT (pending leadership sign-off)
+**Version:** 1.1 DRAFT (pending leadership sign-off)
 **Owner:** Maurice Ragland
 **Effective:** TBD (target: Sprint 5, Week of Aug 24, 2026)
-**Last revised:** 2026-07-29
+**Last revised:** 2026-07-31
+
+**v1.1 revision notes:** (a) §11.2 rewritten — Ashley Baines is Bar Lead with expanded managerial authority; scorecard tracks both Bar Lead peer trend and Manager peer-cohort benchmarks. (b) Signoff block updated — Eddie Jasper, Derwin James Jr., Ashley Baines (Bar Lead with Managerial Authority). Aligned with LOV3_COMP_STRATEGIC_REVIEW.md v2.1.
 
 This document defines the comp management taxonomy, targets, tab-naming standards,
 promoter caps, and enforcement rules for LOV3 Houston. It supersedes ad-hoc practices
@@ -285,12 +287,16 @@ ring-ins for recovery.
 - Trend line: 4-week rolling
 - Outlier flag: > 150% of manager peer median AND > $250 for the week
 
-### 11.2 Bar Lead Category (Ashley)
+### 11.2 Bar Lead with Managerial Authority Category (Ashley)
 
-- **Own category** — separate peer group of one for now
-- Metrics: recovery %, discretionary %, item-level ring pattern (Spill / Bug / Bottle Broke frequency)
-- Compared against her own 4-week trend, not other categories
-- If additional Bar Leads are hired, they join this peer group
+Ashley Baines carries the Bar Lead title with expanded managerial authority (approves Manager Comp checks up to $488, functionally within manager comp-approval scope). Her scorecard tracks BOTH:
+
+- **Bar Lead peer trend** (own 4-week rolling trend): recovery %, discretionary %, item-level ring pattern (Spill / Bug / Bottle Broke frequency)
+- **Manager peer-cohort comparison** (against Tiffany · Tony · Daja): Manager Discretionary % of net sales, reason-code diversity, approver-server pair concentration, comp $ approved per shift
+
+If additional Bar Leads are hired without managerial comp-approval authority, they use the Bar Lead peer trend view only. Bar Leads elevated to managerial authority get both views.
+
+**Role-authority principle (new v1.1):** any employee approving Manager Comps ≥$150 carries an explicit authority tag on the formal roster — either titled Manager OR titled Lead-with-managerial-authority. Toast permissions match the tag. No implicit authority.
 
 ### 11.3 Bottle Manager Station (Anonymous)
 
@@ -402,7 +408,7 @@ Excess In-House Promotional Spend: $X
 
 Scorecards:
   Managers (Tiffany, Tony, Daja): ranked by discretionary + recovery $
-  Bar Lead (Ashley): recovery %, discretionary %, own trend
+  Bar Lead with Managerial Authority (Ashley): dual view — Bar Lead own trend AND Manager peer-cohort comparison
   Bottle Manager station: total comps by bucket
 
 Flagged:
@@ -489,12 +495,12 @@ Items surfaced during the 2026-07-29 grilling that still need leadership decisio
 **Sign-Off Section (to be completed at leadership meeting):**
 
 - [ ] Maurice Ragland (Owner) — ______________
-- [ ] Eddie ______________ (Owner) — ______________
-- [ ] Derwin ______________ (Owner) — ______________
-- [ ] Tiffany Loving (Manager) — ______________
+- [ ] Eddie Jasper (Owner) — ______________
+- [ ] Derwin James Jr. (Owner) — ______________
+- [ ] Tiffany Loving (General Manager) — ______________
 - [ ] Anthony Winn (Manager) — ______________
-- [ ] Dajah Bishop (Manager) — ______________
-- [ ] Ashley Baines (Bar Lead) — ______________
+- [ ] Dajah Bishop (Shift Manager) — ______________
+- [ ] Ashley Baines (Bar Lead with Managerial Authority) — ______________
 
 ---
 
