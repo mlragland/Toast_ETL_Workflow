@@ -39,8 +39,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
-    BaseDocTemplate, Frame, PageBreak, PageTemplate, Paragraph, Spacer, Table,
-    TableStyle,
+    BaseDocTemplate, Frame, KeepTogether, PageBreak, PageTemplate,
+    Paragraph, Spacer, Table, TableStyle,
 )
 
 from comp_analytics import (
@@ -157,6 +157,28 @@ def _pill(text: str, color: colors.Color, size: int = 8) -> Paragraph:
         f'<font color="{color.hexval()}" size="{size}"><b>● {text}</b></font>',
         STYLE_SMALL,
     )
+
+
+# Table cell style for wrapped-string cells (used in Action Plan + RTG)
+STYLE_CELL = ParagraphStyle(
+    "cell", parent=_ss["BodyText"], fontSize=8, leading=10,
+    textColor=INK, spaceAfter=0, alignment=TA_LEFT,
+)
+
+
+def _wrap(text: str) -> Paragraph:
+    """Wrap a raw string in a Paragraph so ReportLab can flow it inside a table cell."""
+    if not isinstance(text, str):
+        return text
+    # Basic HTML escape to avoid ReportLab parser errors
+    import html
+    escaped = html.escape(text)
+    return Paragraph(escaped, STYLE_CELL)
+
+
+def _wrap_row(row: List) -> List:
+    """Wrap every string cell in a Paragraph. First-column bold for header rows."""
+    return [_wrap(c) if isinstance(c, str) else c for c in row]
 
 
 # ── Sprint B constants — COGS map + daypart bins ────────────────────
@@ -438,45 +460,83 @@ def fetch_reason_item_mismatches(bq: bigquery.Client,
 
 def _fetch_shifts_worked(bq: bigquery.Client, mgr_name: str,
                           start: str, end: str) -> Tuple[int, str]:
-    """Return (shifts_worked, source). Try LaborTimeEntries first, then CheckDetails.
+    """Return (shifts_worked, source_label). Multi-signal union detection.
 
-    Some LOV3 managers (Tiffany, Tony) rarely clock in via Toast even though they
-    work — so fall back to counting distinct processing_date where their name
-    appears as the CheckDetails.server (means they were on the floor).
+    Managers who don't clock in via Toast (Tiffany, Tony historically) leave
+    other traces. Union of DISTINCT processing_dates across:
+      1. LaborTimeEntries — clocked in with ≥1 regular hour
+      2. CashEntries.employee / employee_2 — cash drawer activity
+      3. PaymentDetails.void_approver — approved a void (=definitively on-site)
+      4. PaymentDetails.void_user — voided a payment
+      5. CheckDetails.server — ring-in activity
+      6. OrderDetails.server — order-of-record
+
+    Source label reflects which signals fired. If Labor found, "labor";
+    if only floor-activity found, "floor_activity"; if none, "none".
     """
-    # 1. LaborTimeEntries
+    # Toast sometimes stores the void_approver as "RestaurantUser [id=..., user
+    # email = tonywinn@lov3htx.com]" — need substring match on first+last name
+    # AND concatenated email-form ("tonywinn", "tiffanyloving") to catch these.
+    parts = [p.lower() for p in mgr_name.split() if len(p) >= 3]
+    concat_name = "".join(parts) if len(parts) >= 2 else ""
+
     q = f"""
-    SELECT COUNT(DISTINCT processing_date) AS shifts
-    FROM `{PROJECT_ID}.{DATASET_ID}.LaborTimeEntries_raw`
-    WHERE processing_date BETWEEN @start AND @end
-      AND LOWER(employee_name) = LOWER(@name)
-      AND regular_hours >= 1
+    WITH signals AS (
+      SELECT processing_date, 'labor' AS src
+      FROM `{PROJECT_ID}.{DATASET_ID}.LaborTimeEntries_raw`
+      WHERE processing_date BETWEEN @start AND @end
+        AND LOWER(employee_name) = LOWER(@name)
+        AND regular_hours >= 1
+      UNION DISTINCT
+      SELECT processing_date, 'cash'
+      FROM `{PROJECT_ID}.{DATASET_ID}.CashEntries_raw`
+      WHERE processing_date BETWEEN @start AND @end
+        AND (LOWER(employee) = LOWER(@name) OR LOWER(employee_2) = LOWER(@name))
+      UNION DISTINCT
+      SELECT processing_date, 'void_appr'
+      FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
+      WHERE processing_date BETWEEN @start AND @end
+        AND (LOWER(void_approver) = LOWER(@name)
+             OR (@concat != '' AND LOWER(void_approver) LIKE CONCAT('%', @concat, '@%'))
+             OR (@last != '' AND LOWER(void_approver) LIKE CONCAT('%', @last, '@%')))
+      UNION DISTINCT
+      SELECT processing_date, 'void_user'
+      FROM `{PROJECT_ID}.{DATASET_ID}.PaymentDetails_raw`
+      WHERE processing_date BETWEEN @start AND @end
+        AND (LOWER(void_user) = LOWER(@name)
+             OR (@concat != '' AND LOWER(void_user) LIKE CONCAT('%', @concat, '@%')))
+      UNION DISTINCT
+      SELECT processing_date, 'server'
+      FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
+      WHERE processing_date BETWEEN @start AND @end
+        AND LOWER(server) = LOWER(@name)
+      UNION DISTINCT
+      SELECT processing_date, 'order_srv'
+      FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
+      WHERE processing_date BETWEEN @start AND @end
+        AND LOWER(server) = LOWER(@name)
+    )
+    SELECT
+      COUNT(DISTINCT processing_date) AS shifts,
+      STRING_AGG(DISTINCT src ORDER BY src) AS sources
+    FROM signals
     """
     job = bq.query(q, job_config=bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("start", "DATE", start),
         bigquery.ScalarQueryParameter("end", "DATE", end),
         bigquery.ScalarQueryParameter("name", "STRING", mgr_name),
+        bigquery.ScalarQueryParameter("concat", "STRING", concat_name),
+        bigquery.ScalarQueryParameter("last", "STRING", parts[-1] if parts else ""),
     ]))
     for row in job.result():
         s = int(row.shifts or 0)
-        if s > 0:
+        sources = row.sources or ""
+        if s == 0:
+            return 0, "none"
+        # Determine primary source label
+        if "labor" in sources:
             return s, "labor"
-
-    # 2. Fallback: CheckDetails distinct processing_date where mgr is server
-    q2 = f"""
-    SELECT COUNT(DISTINCT processing_date) AS shifts
-    FROM `{PROJECT_ID}.{DATASET_ID}.CheckDetails_raw`
-    WHERE processing_date BETWEEN @start AND @end
-      AND server = @name
-    """
-    job2 = bq.query(q2, job_config=bigquery.QueryJobConfig(query_parameters=[
-        bigquery.ScalarQueryParameter("start", "DATE", start),
-        bigquery.ScalarQueryParameter("end", "DATE", end),
-        bigquery.ScalarQueryParameter("name", "STRING", mgr_name),
-    ]))
-    for row in job2.result():
-        s = int(row.shifts or 0)
-        return s, "checks_fallback" if s > 0 else "none"
+        return s, "floor_activity"
     return 0, "none"
 
 
@@ -846,7 +906,7 @@ def fetch_bottle_manager_audit(bq: bigquery.Client, start: str, end: str) -> BMA
 # ── Page builders ────────────────────────────────────────────────────
 
 
-def _footer(canv: canvas.Canvas, doc, version: str = "v7.0"):
+def _footer(canv: canvas.Canvas, doc, version: str = "v8.0"):
     canv.saveState()
     canv.setFont("Helvetica", 7)
     canv.setFillColor(BONE)
@@ -912,7 +972,7 @@ def build_cover(cur: CompPeriod) -> List:
         ["Managers", "Tiffany Loving · Anthony Winn · Dajah Bishop"],
         ["Bar Lead", "Ashley Baines"],
         ["Generated", datetime.now().strftime("%B %-d, %Y at %-I:%M %p Central")],
-        ["Document version", "v7.0 · Policy rev 2026-07-29"],
+        ["Document version", "v8.0 · Policy rev 2026-07-29"],
         ["Classification", "CONFIDENTIAL — For Leadership Only"],
     ]
     t = Table(dist_data, colWidths=[1.7 * inch, 4.5 * inch])
@@ -928,6 +988,9 @@ def build_cover(cur: CompPeriod) -> List:
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        # Explicit gap between label column and value column
+        ("RIGHTPADDING", (0, 0), (0, -1), 16),
+        ("LEFTPADDING", (1, 0), (1, -1), 12),
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, GOLD),
     ]))
     story.append(t)
@@ -1071,7 +1134,7 @@ def build_lp_audit(lp_voids: List[LPVoidRecord],
                     reason_mismatches: List[ReasonItemMismatch]) -> List:
     """Page 3 — Loss Prevention Audit. Split into LP-A skim vectors + LP-B collusion."""
     story = []
-    story.append(Paragraph("Page 3 · Loss Prevention", STYLE_EYEBROW))
+    story.append(Paragraph("Loss Prevention", STYLE_EYEBROW))
     story.append(Paragraph("Loss Prevention Audit", STYLE_H1))
     story.append(Paragraph(
         "Split into <b>LP-A: Real-Time Skim Vectors</b> (this week) and "
@@ -1173,7 +1236,7 @@ def build_lp_audit(lp_voids: List[LPVoidRecord],
     story.append(PageBreak())
 
     # ── LP-B · Structural Collusion (trailing 90 days) ──
-    story.append(Paragraph("Page 4 · Loss Prevention (continued)", STYLE_EYEBROW))
+    story.append(Paragraph("Loss Prevention (continued)", STYLE_EYEBROW))
     story.append(Paragraph("LP-B · Structural Collusion (90-Day Lookback)", STYLE_H1))
     story.append(Paragraph(
         "Repeat approver→server void pairs across the trailing 90 days. "
@@ -1247,7 +1310,7 @@ def build_lp_audit(lp_voids: List[LPVoidRecord],
 def build_bottle_manager_ledger(bm_audit: BMAudit, cur: CompPeriod) -> List:
     """Page 4 — Bottle Manager Ledger (direct answer to CEO's Q)."""
     story = []
-    story.append(Paragraph("Page 4 · Bottle Manager", STYLE_EYEBROW))
+    story.append(Paragraph("Bottle Manager", STYLE_EYEBROW))
     story.append(Paragraph("Bottle Manager Ledger", STYLE_H1))
     story.append(Paragraph(
         "Bottle Manager is a pooling station, not a person. This section itemizes "
@@ -1294,7 +1357,7 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
                               behaviors: Dict[str, ManagerBehaviorMetrics]) -> List:
     """Page 5 — Manager Performance (Tiffany · Tony · Daja) with peer benchmarks."""
     story = []
-    story.append(Paragraph("Page 5 · Manager Performance", STYLE_EYEBROW))
+    story.append(Paragraph("Manager Performance", STYLE_EYEBROW))
     story.append(Paragraph("Manager Scorecard — Tiffany · Tony · Daja · Ashley", STYLE_H1))
     story.append(Paragraph(
         "Peer-benchmarked KPIs for all four managers (Ashley merged into "
@@ -1357,7 +1420,7 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
         delta = s.discretionary_comp - peer_disc_median
         delta_str = f"+${delta:,.0f}" if delta > 0 else f"−${abs(delta):,.0f}"
         shifts_str = str(b.shifts_worked) if b else "—"
-        if b and b.shifts_source == "checks_fallback":
+        if b and b.shifts_source == "floor_activity":
             shifts_str += "*"
         per_shift = f"${b.discretionary_per_shift:,.0f}" if b and b.shifts_worked else "—"
         mgr_rows.append([
@@ -1372,11 +1435,11 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
     mt.setStyle(TABLE_STYLE_STANDARD)
     story.append(mt)
     # Footnote for fallback source
-    if any(b and b.shifts_source == "checks_fallback" for b in behaviors.values()):
+    if any(b and b.shifts_source == "floor_activity" for b in behaviors.values()):
         story.append(Paragraph(
-            "<i>*Shifts sourced from CheckDetails (server activity) — manager "
-            "did not clock in via Toast Labor. Actual shift count may be higher "
-            "if they worked without opening tabs (cash register only).</i>",
+            "<i>*Shifts inferred from floor activity (CashEntries + void approvals + "
+            "check server + order server) — manager did not clock in via Toast Labor. "
+            "Multi-signal union of processing dates; any one signal = shift worked.</i>",
             STYLE_SMALL,
         ))
 
@@ -1682,7 +1745,7 @@ def build_bar_lead_scorecard(cur: CompPeriod, prev: CompPeriod,
                               recon: BirthdayReconciliationResult) -> List:
     """Page 6 — Bar Lead Scorecard (Ashley) — own KPI category."""
     story = []
-    story.append(Paragraph("Page 6 · Bar Lead Performance", STYLE_EYEBROW))
+    story.append(Paragraph("Bar Lead Performance", STYLE_EYEBROW))
     story.append(Paragraph("Bar Lead Scorecard — Ashley Baines", STYLE_H1))
     story.append(Paragraph(
         "Ashley is tracked in her own performance category — her volume profile "
@@ -1775,7 +1838,7 @@ def build_bar_lead_scorecard(cur: CompPeriod, prev: CompPeriod,
 def build_birthday_page(recon: BirthdayReconciliationResult) -> List:
     """Page 6 — Birthday Reconciliation vs SR."""
     story = []
-    story.append(Paragraph("Page 6 · Birthday Package Compliance", STYLE_EYEBROW))
+    story.append(Paragraph("Birthday Package Compliance", STYLE_EYEBROW))
     story.append(Paragraph("Birthday Reconciliation vs SevenRooms", STYLE_H1))
     story.append(Paragraph(
         "<b>Eligibility rule:</b> Only reservations with 'Birthday Dinner Package' "
@@ -1849,7 +1912,7 @@ def build_best_practices(cur: CompPeriod,
                           recon: BirthdayReconciliationResult) -> List:
     """Page 8 — Best Practices identified from data analysis (staff-facing)."""
     story = []
-    story.append(Paragraph("Page 8 · Learning From Excellence", STYLE_EYEBROW))
+    story.append(Paragraph("Learning From Excellence", STYLE_EYEBROW))
     story.append(Paragraph("Best Practices — Staff Highlights", STYLE_H1))
     story.append(Paragraph(
         "Patterns identified during audit that other staff should emulate. "
@@ -1942,7 +2005,7 @@ def build_risks_opportunities(cur: CompPeriod,
                                 bm_audit: BMAudit) -> List:
     """Page 9 — Risks & Opportunities identified from analysis."""
     story = []
-    story.append(Paragraph("Page 9 · Forward Look", STYLE_EYEBROW))
+    story.append(Paragraph("Forward Look", STYLE_EYEBROW))
     story.append(Paragraph("Risks & Opportunities", STYLE_H1))
     story.append(Paragraph(
         "Systemic risks (leakage / fraud / non-compliance) and opportunities "
@@ -2072,7 +2135,7 @@ def build_action_plan(cur: CompPeriod,
                        lp_voids: List[LPVoidRecord]) -> List:
     """Page 10 — 30/60/90-day Action Plan with owners + success criteria."""
     story = []
-    story.append(Paragraph("Page 10 · Roadmap", STYLE_EYEBROW))
+    story.append(Paragraph("Roadmap", STYLE_EYEBROW))
     story.append(Paragraph("Action Plan — 30 / 60 / 90 Days", STYLE_H1))
     story.append(Paragraph(
         "Roadmap to close discipline gaps and lock in best practices. Each action "
@@ -2107,7 +2170,8 @@ def build_action_plan(cur: CompPeriod,
             "Zero self-approved voids in weekly report",
             "2026-08-13",
         ])
-    dt = Table(d30, colWidths=[2.5 * inch, 1.6 * inch, 1.9 * inch, 1.2 * inch])
+    d30_wrapped = [d30[0]] + [_wrap_row(r) for r in d30[1:]]
+    dt = Table(d30_wrapped, colWidths=[2.3 * inch, 1.5 * inch, 2.2 * inch, 1.0 * inch])
     dt.setStyle(TABLE_STYLE_STANDARD)
     story.append(dt)
 
@@ -2135,7 +2199,8 @@ def build_action_plan(cur: CompPeriod,
          "Top-diversity manager named at Sept leadership meeting",
          "2026-09-15"],
     ]
-    d6t = Table(d60, colWidths=[2.5 * inch, 1.6 * inch, 1.9 * inch, 1.2 * inch])
+    d60_wrapped = [d60[0]] + [_wrap_row(r) for r in d60[1:]]
+    d6t = Table(d60_wrapped, colWidths=[2.3 * inch, 1.5 * inch, 2.2 * inch, 1.0 * inch])
     d6t.setStyle(TABLE_STYLE_STANDARD)
     story.append(d6t)
 
@@ -2161,7 +2226,8 @@ def build_action_plan(cur: CompPeriod,
          "All managers",
          "100% shift-meeting attendance tracked", "2026-11-15"],
     ]
-    d9t = Table(d90, colWidths=[2.5 * inch, 1.6 * inch, 1.9 * inch, 1.2 * inch])
+    d90_wrapped = [d90[0]] + [_wrap_row(r) for r in d90[1:]]
+    d9t = Table(d90_wrapped, colWidths=[2.3 * inch, 1.5 * inch, 2.2 * inch, 1.0 * inch])
     d9t.setStyle(TABLE_STYLE_STANDARD)
     story.append(d9t)
 
@@ -2172,7 +2238,7 @@ def build_action_plan(cur: CompPeriod,
 def build_promoter_recap(cur: CompPeriod) -> List:
     """Page 7 — Promoter Recap (prose per COO)."""
     story = []
-    story.append(Paragraph("Page 7 · Promoter Discipline", STYLE_EYEBROW))
+    story.append(Paragraph("Promoter Discipline", STYLE_EYEBROW))
     story.append(Paragraph("Promoter Cap Recap", STYLE_H1))
     story.append(Paragraph(
         "Each promoter event's actual bottle count versus the per-event cap. "
@@ -2211,7 +2277,7 @@ def build_promoter_recap(cur: CompPeriod) -> List:
 def build_return_to_green(cur: CompPeriod, recon: BirthdayReconciliationResult) -> List:
     """Page 8 — Return-to-Green Plan."""
     story = []
-    story.append(Paragraph("Page 8 · Recovery Plan", STYLE_EYEBROW))
+    story.append(Paragraph("Recovery Plan", STYLE_EYEBROW))
     story.append(Paragraph("Return-to-Green Plan", STYLE_H1))
     story.append(Paragraph(
         "Where the current week landed in the red, the corrective actions with "
@@ -2277,9 +2343,10 @@ def build_return_to_green(cur: CompPeriod, recon: BirthdayReconciliationResult) 
                        "—", "—", "—"])
 
     story.append(Spacer(1, 0.1 * inch))
-    a_rows = [["Action", "Detail", "$ Recovery", "Owner", "Deadline"]] + actions
-    at = Table(a_rows, colWidths=[1.9 * inch, 2.3 * inch, 1.0 * inch,
-                                    1.3 * inch, 1.0 * inch])
+    a_rows = [["Action", "Detail", "$ Recovery", "Owner", "Deadline"]] + \
+              [_wrap_row(r) for r in actions]
+    at = Table(a_rows, colWidths=[2.0 * inch, 2.6 * inch, 0.8 * inch,
+                                    1.2 * inch, 0.9 * inch])
     at.setStyle(TABLE_STYLE_STANDARD)
     story.append(at)
 
@@ -2483,7 +2550,7 @@ def generate_and_send(to_email: str,
 
     body_html = f"""
     <div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:640px;color:#111">
-    <p>Attached: LOV3 Weekly Comp Discipline Report v7.0 for the week of <b>{label}</b>.</p>
+    <p>Attached: LOV3 Weekly Comp Discipline Report v8.0 for the week of <b>{label}</b>.</p>
     <p><b>Verdict:</b> {cur.grade()[0]} · Blended {cur.total_pct:.2f}% (target &lt;4%)</p>
     <p><b>Money at risk:</b> {_money(sum(m.foregone_revenue for m in cur.tier_2_movements.values()))} Tier 2 foregone
     · {len([f for f in lp_voids if f.is_cash])} cash voids · {sum(1 for c in cur.promoter_caps if c.is_over_cap)} cap breach(es)</p>
