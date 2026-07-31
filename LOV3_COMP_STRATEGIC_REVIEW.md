@@ -3,7 +3,9 @@
 **Prepared for:** LOV3 Leadership Team (Maurice · Eddie · Derwin · Tiffany · Tony · Daja · Ashley)
 **Prepared by:** Executive Committee (Analytics + 9 domain experts across 2 review rounds)
 **Date:** 2026-07-31
-**Version:** 1.0 · Confidential — For Leadership Only
+**Version:** 2.0 · Confidential — For Leadership Only
+
+**Recent update (2026-07-31):** Ashley Baines formally reclassified from Bar Lead to Manager based on duties (approving Manager Comp checks up to $488 = manager-level authority per audit). This document reflects Ashley as a Manager throughout. Her manager KPIs are now benchmarked against the peer cohort (Tiffany · Tony · Daja).
 
 ---
 
@@ -32,7 +34,7 @@ Over 8 days and 7 iterations of the weekly comp discipline report, we conducted 
 
 ### 🔴 Weaknesses
 
-- **Ashley Baines has manager-comp authority as a Bar Lead** — she approved $488 Manager Comp checks; industry standard says Bar Leads cap at $150
+- **Role-vs-duty misalignment (historical)** — Ashley Baines was titled Bar Lead while functioning as a manager (approving $488 Manager Comp checks). Now reclassified to Manager as of 2026-07-31; org chart, Toast permissions, and scorecard peer group updated. Future weakness prevention: any employee approving Manager Comps ≥ $150 must carry a Manager title on the formal roster.
 - **Anthony Winn 1/4 reason-code diversity** — every comp lands in "Manager Comp" bucket, category laziness that masks intent
 - **Bottle Manager station is anonymous** — $7,991 in 90 days with zero accountability
 - **Tab-naming inconsistency** — Ashley's `Fri Bday`, `Sat Bday`, `Fridaay Bday`, `Saturday Bday` variants destroyed 60 days of reconciliation
@@ -162,7 +164,7 @@ LOV3 at 3.3% over 90 days is **3x the target**. Not because managers are corrupt
 | Owner Comp PIN | Unlocked | PIN + Slack notify wired | Unbounded — 1 bad night = $2K+ |
 | Bottle Manager station | Anonymous | Named role, scheduled rotation | ~$800-1,200/wk unassignable |
 | Tab naming | Free-text, inconsistent | POS-enforced dropdown or manager gate | ~$1,500-2,500/wk unattributable |
-| Bar Lead authority | $488+ Manager Comps approved | Cap at $150 non-comp; escalate above | Loss of manager gate-keeping |
+| Role-vs-duty alignment | Ashley approved $488 Manager Comps as Bar Lead (title-duty mismatch) | Every employee approving Manager Comps ≥$150 titled Manager on formal roster; org chart enforced at hire | Loss of manager gate-keeping; ambiguous accountability |
 | Reason-code taxonomy | Grandfathered "Manager Comp" default | 15-code taxonomy pre-loaded | Category collapse; report loses meaning |
 | OWNER-SKU vs retail | Cost-basis SKUs corrupt revenue | Retail SKUs + discount codes only | Dual accounting forever |
 | Guest name on tabs | Empty | Required on tabs receiving ≥$100 comp | Buddy-comping undetectable |
@@ -272,7 +274,7 @@ Before VIC3 opens, these MUST be hardened at LOV3 first so the template is clean
 
 1. **PIN + reason code required at every comp ring** — no exceptions
 2. **Named Bottle Manager per shift on the schedule** — kill the anonymous station
-3. **Bar Lead authority capped** — Ashley (and future Bar Leads) cannot approve comps ≥$150; escalate above
+3. **Role-title enforcement** — anyone approving Manager Comps ≥$150 must be titled Manager on the formal roster before opening day; POS permissions matched to org chart
 4. **Guest name required on tab** for any check receiving ≥$100 comp — enables detection
 5. **15-code reason taxonomy pre-loaded in Toast** — the generic "Manager Comp" default is deleted
 6. **Retail SKUs only for daily menu** — OWNER-prefixed SKUs kept for owner-personal only; not for program delivery
@@ -323,7 +325,7 @@ Before VIC3 opens, these MUST be hardened at LOV3 first so the template is clean
 
 - [ ] India Thomas cash-drawer review + camera pull (owner action)
 - [ ] Toast rep call to identify anonymous voider (`4379fdda-...@example.com`)
-- [ ] Ashley Baines Bar Lead POS authority limit (Toast config)
+- [ ] Ashley Baines formal Manager title update (org chart + Toast permissions + peer scorecard onboarding)
 - [ ] Tony Winn / Jordyn Aiken 90-day pattern conversation (leadership)
 - [ ] Maker's Mark spillage inventory tie-out (LP + inventory manager)
 - [ ] Deploy Bday-{D}-{Name} tab naming (Sprint 2 rollout)
@@ -364,6 +366,6 @@ This document represents the consensus recommendation of a 9-agent executive com
 - [ ] Tiffany Loving (General Manager) — ______________
 - [ ] Anthony Winn (Manager) — ______________
 - [ ] Dajah Bishop (Shift Manager) — ______________
-- [ ] Ashley Baines (Bar Lead) — ______________
+- [ ] Ashley Baines (Manager) — ______________
 
 *This document supersedes prior comp policy language where conflicting. Revisions require full leadership review.*
