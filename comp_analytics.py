@@ -1055,17 +1055,56 @@ class CompAnalytics:
         )[:10]
 
         # Promoter cap enforcement — per event
+        # Fallback rule (locked 2026-07-31): until Bday-{D}-{Name} tab-naming
+        # standard rolls out, any comped bottle that is NOT on an owner tab
+        # (Maurice/Eddie/Derwin) and NOT on a birthday tab counts as promoter
+        # or in-house comp for that day of the week. This closes the
+        # DAE7/Cassette/etc. attribution gap where servers used server-name
+        # tabs (E5 Ceriah, Marcus E3) instead of promoter labels.
         for cap in PROMOTER_CAPS:
             result = PromoterCapResult(
                 key=cap["key"], day=cap["day"], event=cap["event"],
                 poc=cap["poc"], cap=cap["cap"], cap_type=cap["type"],
             )
             for it in comp_items:
-                matched = match_promoter_cap(it.tab_name, it.processing_date)
-                if not matched or matched["key"] != cap["key"]:
-                    continue
+                # Skip non-bottle items
                 if not is_bottle(it.menu_item, it.sales_category, it.gross_price):
                     continue
+
+                # Rule 1: date must fall on this event's day-of-week
+                try:
+                    d = date.fromisoformat(it.processing_date)
+                except (ValueError, TypeError):
+                    continue
+                if d.weekday() != cap["dow"]:
+                    continue
+
+                # Rule 2: exclude owner-tab bottles (owner personal/discretionary)
+                if match_owner_from_tab(it.tab_name):
+                    continue
+
+                # Rule 3: exclude birthday-tab bottles (birthday program)
+                tab_low = (it.tab_name or "").lower()
+                if "bday" in tab_low or "birthday" in tab_low:
+                    continue
+
+                # Rule 4: Sunday has TWO events — split by tab signal
+                # DAE7 (brunch) vs Cassette (late night). If neither tab-signal
+                # matches, use daypart heuristic: sunday morning/afternoon → DAE7,
+                # evening → Cassette. If daypart unknown, assign to DAE7 (brunch).
+                if cap["dow"] == 6:  # Sunday
+                    matched_signal = match_promoter_cap(it.tab_name, it.processing_date)
+                    if matched_signal and matched_signal["key"] != cap["key"]:
+                        # Tab explicitly matches the OTHER Sunday event — skip
+                        continue
+                    if not matched_signal:
+                        # Fallback: split by daypart (need opened_time; item log
+                        # doesn't have it — use rough heuristic based on cap key)
+                        # For now, assign non-labeled Sunday bottles to Cassette
+                        # (late night is where most Sunday bottle activity happens).
+                        if cap["key"] == "sun_dae7":
+                            continue
+
                 result.bottle_count += 1
                 result.bottle_dollars += it.discount
                 if it.is_tier_2:

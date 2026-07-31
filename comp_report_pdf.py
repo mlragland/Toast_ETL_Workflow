@@ -638,7 +638,7 @@ def fetch_daypart_split(bq: bigquery.Client, start: str, end: str
                          ) -> List[DaypartComp]:
     """Comp $ + count + net-sales base per daypart bin (Pre-11p / Peak / Late)."""
     q = f"""
-    WITH parsed AS (
+    WITH comps AS (
       SELECT
         SAFE_CAST(discount AS FLOAT64) AS discount,
         SAFE.PARSE_TIME('%I:%M %p', opened_time) AS ot
@@ -647,39 +647,58 @@ def fetch_daypart_split(bq: bigquery.Client, start: str, end: str
         AND SAFE_CAST(discount AS FLOAT64) > 0
         AND opened_time IS NOT NULL AND opened_time != ''
     ),
-    bins AS (
+    comp_bins AS (
       SELECT
         CASE
           WHEN EXTRACT(HOUR FROM ot) BETWEEN 17 AND 22 THEN 'Pre-11p'
-          WHEN EXTRACT(HOUR FROM ot) >= 23 OR EXTRACT(HOUR FROM ot) = 0 THEN 'Peak (11p-1a)'
+          WHEN EXTRACT(HOUR FROM ot) = 23 OR EXTRACT(HOUR FROM ot) = 0 THEN 'Peak (11p-1a)'
           WHEN EXTRACT(HOUR FROM ot) BETWEEN 1 AND 3 THEN 'Late (1a-close)'
           ELSE 'Other'
         END AS daypart,
         discount
-      FROM parsed
+      FROM comps
       WHERE ot IS NOT NULL
     ),
-    net AS (
+    comp_agg AS (
+      SELECT daypart,
+             ROUND(SUM(discount), 0) AS comp_dollars,
+             COUNT(*) AS comp_count
+      FROM comp_bins
+      GROUP BY daypart
+    ),
+    orders AS (
+      -- OrderDetails.opened is a full datetime string 'YYYY-MM-DD HH:MM:SS'
       SELECT
-        CASE
-          WHEN EXTRACT(HOUR FROM SAFE.PARSE_TIME('%I:%M %p', opened)) BETWEEN 17 AND 22 THEN 'Pre-11p'
-          WHEN EXTRACT(HOUR FROM SAFE.PARSE_TIME('%I:%M %p', opened)) >= 23
-               OR EXTRACT(HOUR FROM SAFE.PARSE_TIME('%I:%M %p', opened)) = 0 THEN 'Peak (11p-1a)'
-          WHEN EXTRACT(HOUR FROM SAFE.PARSE_TIME('%I:%M %p', opened)) BETWEEN 1 AND 3 THEN 'Late (1a-close)'
-          ELSE 'Other'
-        END AS daypart,
+        EXTRACT(HOUR FROM SAFE.PARSE_DATETIME('%Y-%m-%d %H:%M:%S', opened)) AS h,
         SAFE_CAST(amount AS FLOAT64) AS amount
       FROM `{PROJECT_ID}.{DATASET_ID}.OrderDetails_raw`
       WHERE processing_date BETWEEN @start AND @end
         AND opened IS NOT NULL AND opened != ''
+    ),
+    order_bins AS (
+      SELECT
+        CASE
+          WHEN h BETWEEN 17 AND 22 THEN 'Pre-11p'
+          WHEN h = 23 OR h = 0 THEN 'Peak (11p-1a)'
+          WHEN h BETWEEN 1 AND 3 THEN 'Late (1a-close)'
+          ELSE 'Other'
+        END AS daypart,
+        amount
+      FROM orders
+      WHERE h IS NOT NULL
+    ),
+    net_agg AS (
+      SELECT daypart, ROUND(SUM(amount), 0) AS net_sales
+      FROM order_bins
+      GROUP BY daypart
     )
     SELECT
-      b.daypart,
-      ROUND(SUM(b.discount), 0) AS comp_dollars,
-      COUNT(*) AS comp_count,
-      (SELECT ROUND(SUM(amount), 0) FROM net n WHERE n.daypart = b.daypart) AS net_sales
-    FROM bins b
-    GROUP BY b.daypart
+      COALESCE(c.daypart, n.daypart) AS daypart,
+      COALESCE(c.comp_dollars, 0) AS comp_dollars,
+      COALESCE(c.comp_count, 0) AS comp_count,
+      COALESCE(n.net_sales, 0) AS net_sales
+    FROM comp_agg c
+    FULL OUTER JOIN net_agg n USING (daypart)
     """
     job = bq.query(q, job_config=bigquery.QueryJobConfig(query_parameters=[
         bigquery.ScalarQueryParameter("start", "DATE", start),
@@ -827,7 +846,7 @@ def fetch_bottle_manager_audit(bq: bigquery.Client, start: str, end: str) -> BMA
 # ── Page builders ────────────────────────────────────────────────────
 
 
-def _footer(canv: canvas.Canvas, doc, version: str = "v6.0"):
+def _footer(canv: canvas.Canvas, doc, version: str = "v7.0"):
     canv.saveState()
     canv.setFont("Helvetica", 7)
     canv.setFillColor(BONE)
@@ -840,30 +859,49 @@ def _footer(canv: canvas.Canvas, doc, version: str = "v6.0"):
 
 def build_cover(cur: CompPeriod) -> List:
     """Page 1 — Cover with wordmark, distribution, confidentiality."""
+    # Dedicated cover style with generous leading so wordmark doesn't collide
+    # with the eyebrow text below.
+    cover_wordmark_style = ParagraphStyle(
+        "cover_wordmark", parent=STYLE_CENTER,
+        fontSize=42, leading=52, fontName="Helvetica-Bold",
+        spaceAfter=6,
+    )
+    cover_eyebrow_style = ParagraphStyle(
+        "cover_eyebrow", parent=STYLE_CENTER,
+        fontSize=9, leading=12, textColor=GOLD, fontName="Helvetica-Bold",
+        spaceBefore=8, spaceAfter=0,
+    )
+    cover_title_style = ParagraphStyle(
+        "cover_title", parent=STYLE_CENTER,
+        fontSize=24, leading=30, textColor=BLACK, fontName="Helvetica-Bold",
+        spaceBefore=0, spaceAfter=8,
+    )
+    cover_period_style = ParagraphStyle(
+        "cover_period", parent=STYLE_CENTER,
+        fontSize=14, leading=18, textColor=BONE,
+    )
+
     story = []
-    story.append(Spacer(1, 1.6 * inch))
-    # Wordmark
+    story.append(Spacer(1, 1.5 * inch))
+    # Wordmark — dedicated leading prevents overlap with eyebrow below
     story.append(Paragraph(
-        '<font size="42" color="#111111"><b>LOV3</b></font>'
-        '<font size="42" color="#B8956A"><b>|</b></font>'
-        '<font size="42" color="#111111"><b>HTX</b></font>',
-        STYLE_CENTER,
+        '<font color="#111111"><b>LOV3</b></font>'
+        '<font color="#B8956A"><b>|</b></font>'
+        '<font color="#111111"><b>HTX</b></font>',
+        cover_wordmark_style,
     ))
-    story.append(Spacer(1, 0.08 * inch))
+    # Explicit spacer so eyebrow drops clearly below the wordmark
+    story.append(Spacer(1, 0.35 * inch))
     story.append(Paragraph(
-        '<font color="#B8956A" size="9"><b>LEADERSHIP · COMP DISCIPLINE · WEEKLY</b></font>',
-        STYLE_CENTER,
+        "LEADERSHIP · COMP DISCIPLINE · WEEKLY",
+        cover_eyebrow_style,
     ))
-    story.append(Spacer(1, 0.6 * inch))
-    story.append(Paragraph(
-        '<font size="24"><b>Weekly Comp Discipline Report</b></font>',
-        STYLE_CENTER,
-    ))
+    story.append(Spacer(1, 0.55 * inch))
+    story.append(Paragraph("Weekly Comp Discipline Report", cover_title_style))
     story.append(Spacer(1, 0.15 * inch))
     story.append(Paragraph(
-        f'<font size="14" color="#6a6a6a">Week of {cur.label} · '
-        f'{cur.start} to {cur.end}</font>',
-        STYLE_CENTER,
+        f"Week of {cur.label} · {cur.start} to {cur.end}",
+        cover_period_style,
     ))
 
     story.append(Spacer(1, 1.4 * inch))
@@ -874,7 +912,7 @@ def build_cover(cur: CompPeriod) -> List:
         ["Managers", "Tiffany Loving · Anthony Winn · Dajah Bishop"],
         ["Bar Lead", "Ashley Baines"],
         ["Generated", datetime.now().strftime("%B %-d, %Y at %-I:%M %p Central")],
-        ["Document version", "v6.0 · Policy rev 2026-07-29"],
+        ["Document version", "v7.0 · Policy rev 2026-07-29"],
         ["Classification", "CONFIDENTIAL — For Leadership Only"],
     ]
     t = Table(dist_data, colWidths=[1.7 * inch, 4.5 * inch])
@@ -1268,22 +1306,30 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
         STYLE_BODY,
     ))
 
-    # Compute peer stats for benchmarking
-    mgr_scores = [cur.named_scorecards.get(n) for n in MANAGERS
-                  if cur.named_scorecards.get(n)]
-    peer_disc = [s.discretionary_comp for s in mgr_scores]
+    # Compute peer stats for benchmarking — only include managers who ACTUALLY
+    # showed activity this week (comp_count > 0). Otherwise peer median is 0
+    # because inactive managers with 0 comps drag the median to zero.
+    all_mgr_scores = [cur.named_scorecards.get(n) for n in MANAGERS
+                      if cur.named_scorecards.get(n)]
+    active_scores = [s for s in all_mgr_scores if s.comp_count > 0]
+    peer_source = active_scores if active_scores else all_mgr_scores
+    peer_disc = [s.discretionary_comp for s in peer_source]
     peer_disc_median = sorted(peer_disc)[len(peer_disc)//2] if peer_disc else 0.0
     peer_diversity_median = (
-        sorted([s.reason_code_diversity for s in mgr_scores])[len(mgr_scores)//2]
-        if mgr_scores else 0
+        sorted([s.reason_code_diversity for s in peer_source])[len(peer_source)//2]
+        if peer_source else 0
     )
+    # Note transparency
+    peer_note = (f"(median of {len(peer_source)} active manager{'s' if len(peer_source) != 1 else ''}"
+                 + (" this week)" if active_scores else " — inactive weeks included, median = 0)"))
 
     # ── Peer Benchmark table ──
     story.append(Spacer(1, 0.1 * inch))
-    story.append(Paragraph("PEER BENCHMARKS", STYLE_H3))
-    # Compute peer median discretionary $/shift
+    story.append(Paragraph(f"PEER BENCHMARKS {peer_note}", STYLE_H3))
+    # Compute peer median discretionary $/shift — active managers only
     per_shift_vals = [b.discretionary_per_shift
-                       for b in behaviors.values() if b.shifts_worked > 0]
+                       for b in behaviors.values()
+                       if b.shifts_worked > 0 and b.discretionary_comp > 0]
     peer_per_shift_median = (sorted(per_shift_vals)[len(per_shift_vals)//2]
                               if per_shift_vals else 0.0)
     bench_rows = [
@@ -1425,7 +1471,7 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
     # ── Waterfall ──
     story.append(Spacer(1, 0.15 * inch))
     story.append(Paragraph("MANAGER DISCRETIONARY WATERFALL", STYLE_H3))
-    named_disc = sum(s.discretionary_comp for s in mgr_scores)
+    named_disc = sum(s.discretionary_comp for s in all_mgr_scores)
     bar_lead_disc = sum(s.discretionary_comp for s in cur.named_scorecards.values()
                         if s.role == "Bar Lead")
     bm_disc = cur.bottle_manager.discretionary_comp
@@ -1457,6 +1503,66 @@ def build_manager_scorecard(cur: CompPeriod, prev: CompPeriod,
         ("LINEABOVE", (0, -1), (-1, -1), 1, BLACK),
     ]))
     story.append(wt)
+
+    # ── "Other" servers breakdown (transparency about the waterfall row) ──
+    if other > 0:
+        # Aggregate Manager Discretionary $ from servers NOT in MANAGERS
+        # and NOT Bottle Manager
+        other_rows_agg: Dict[str, float] = {}
+        for it in cur.item_log:
+            if (it.bucket == "discretionary_manager"
+                and it.server
+                and it.server not in MANAGERS
+                and it.server != "Bottle Manager"):
+                other_rows_agg[it.server] = other_rows_agg.get(it.server, 0.0) + it.discount
+        story.append(Spacer(1, 0.1 * inch))
+        story.append(Paragraph(
+            "'OTHER (UNATTRIBUTED SERVERS)' — WHO'S RUNGING MANAGER COMPS?",
+            STYLE_H3,
+        ))
+        story.append(Paragraph(
+            "Servers who are NOT in the manager cohort but rang comps that "
+            "landed in Manager Discretionary (typically because a manager approved "
+            "at check level while the server appears as the ring-of-record).",
+            STYLE_SMALL,
+        ))
+        top_other = sorted(other_rows_agg.items(), key=lambda kv: -kv[1])[:8]
+        oth_rows = [["Server", "Discretionary $ rung"]]
+        for name, amt in top_other:
+            oth_rows.append([name, _money(amt)])
+        if not top_other:
+            oth_rows.append(["(none)", "$0"])
+        ot = Table(oth_rows, colWidths=[3.6 * inch, 2.0 * inch])
+        ot.setStyle(TABLE_STYLE_STANDARD)
+        story.append(ot)
+
+    # ── Uncategorized attribution (who's ringing Open $/%?) ──
+    if uncateg > 0:
+        uncateg_agg: Dict[str, float] = {}
+        for row in [r for r in cur.flagged
+                     if r.bucket in ("uncategorized_open_dollar", "uncategorized_open_pct")]:
+            if row.server:
+                uncateg_agg[row.server] = uncateg_agg.get(row.server, 0.0) + row.amount
+        story.append(Spacer(1, 0.1 * inch))
+        story.append(Paragraph(
+            "UNCATEGORIZED RING-IN ATTRIBUTION — WHO NEEDS REASON-CODE TRAINING?",
+            STYLE_H3,
+        ))
+        story.append(Paragraph(
+            "Servers whose Open $ / Open % ring-ins account for this week's "
+            "uncategorized total. Direct training targets.",
+            STYLE_SMALL,
+        ))
+        top_unc = sorted(uncateg_agg.items(), key=lambda kv: -kv[1])[:8]
+        unc_rows = [["Server", "Uncategorized $"]]
+        for name, amt in top_unc:
+            unc_rows.append([name, _money(amt)])
+        if not top_unc:
+            unc_rows.append(["(none)", "$0"])
+        ut = Table(unc_rows, colWidths=[3.6 * inch, 2.0 * inch])
+        ut.setStyle(TABLE_STYLE_STANDARD)
+        ut.setStyle(TableStyle([("TEXTCOLOR", (1, 1), (1, -1), RED)]))
+        story.append(ut)
 
     story.append(PageBreak())
     return story
@@ -2074,6 +2180,17 @@ def build_promoter_recap(cur: CompPeriod) -> List:
         "in-house event overages log as excess promotional spend.",
         STYLE_BODY,
     ))
+    story.append(Paragraph(
+        "<b>Attribution rule (interim until tab-naming standard rolls out):</b> "
+        "Any comped bottle that is (a) rung on the event's day of week, "
+        "(b) NOT on an owner tab (Maurice / Eddie / Derwin), and "
+        "(c) NOT on a birthday tab (<code>Bday</code> / <code>Birthday</code>) "
+        "is counted toward that day's promoter event. Sunday defaults to "
+        "Cassette (late-night bottle service) when no explicit DAE7 signal. "
+        "This will tighten to explicit <code>Promoter - {Day} - {Event}</code> "
+        "tab-name matching once staff adoption reaches 80%.",
+        STYLE_SMALL,
+    ))
 
     story.append(Spacer(1, 0.1 * inch))
     for cap in cur.promoter_caps:
@@ -2366,7 +2483,7 @@ def generate_and_send(to_email: str,
 
     body_html = f"""
     <div style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:640px;color:#111">
-    <p>Attached: LOV3 Weekly Comp Discipline Report v6.0 for the week of <b>{label}</b>.</p>
+    <p>Attached: LOV3 Weekly Comp Discipline Report v7.0 for the week of <b>{label}</b>.</p>
     <p><b>Verdict:</b> {cur.grade()[0]} · Blended {cur.total_pct:.2f}% (target &lt;4%)</p>
     <p><b>Money at risk:</b> {_money(sum(m.foregone_revenue for m in cur.tier_2_movements.values()))} Tier 2 foregone
     · {len([f for f in lp_voids if f.is_cash])} cash voids · {sum(1 for c in cur.promoter_caps if c.is_over_cap)} cap breach(es)</p>
