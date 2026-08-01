@@ -50,14 +50,15 @@ def upload_bank_csv():
         # Get rules from BigQuery (seeds defaults on first call)
         rules = cat_manager.list_rules()
 
-        # Sync check register from Google Sheet for "Check XXXX" lookups
+        # Check register lookup from the BigQuery table for "Check XXXX"
+        # lookups. Sheet sync removed 2026-08-01 — the sheet is frozen and
+        # the lov3checks app feeds CheckRegister directly.
         check_register: Dict[str, Dict] = {}
         try:
             register = CheckRegisterSync(bq_client, DATASET_ID)
-            register.sync_from_sheet()
             check_register = register.get_lookup()
         except Exception as reg_err:
-            logger.warning(f"Check register sync skipped: {reg_err}")
+            logger.warning(f"Check register lookup skipped: {reg_err}")
 
         parser = BofACSVParser(rules, check_register=check_register)
 

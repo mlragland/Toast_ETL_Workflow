@@ -154,14 +154,15 @@ class TellerSync:
         cat_manager = BankCategoryManager(self.bq, DATASET_ID)
         rules = cat_manager.list_rules()
 
-        # Get check register
+        # Get check register from the BigQuery table. The Google Sheet is
+        # FROZEN (2026-07-22) — the lov3checks app now MERGEs new checks into
+        # CheckRegister directly, so we no longer pull the sheet.
         check_register = None
         try:
             register_sync = CheckRegisterSync(self.bq, DATASET_ID)
-            register_sync.sync_from_sheet()
             check_register = register_sync.get_lookup()
         except Exception as e:
-            logger.warning(f"Check register sync skipped: {e}")
+            logger.warning(f"Check register lookup skipped: {e}")
 
         # Run categorization
         parser = BofACSVParser(rules, check_register=check_register)

@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import Blueprint, request, jsonify, Response
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
-from googleapiclient.errors import HttpError as GoogleHttpError
 
 from config import (
     PROJECT_ID, DATASET_ID,
@@ -24,7 +23,6 @@ from config import (
     OPERATIONAL_LABOR_CATEGORIES,
     LABOR_DOW_PCT, FIXED_LABOR_MONTHLY,
     BUDGET_TARGETS, BUDGET_SUBCATEGORIES, UNBUDGETED_SECTIONS,
-    CHECK_REGISTER_SHEET_ID,
     DEFAULT_LIQUOR_COGS_PCT, DEFAULT_FOOD_COGS_PCT,
     DEFAULT_MIXED_BEV_TAX_PCT, DEFAULT_PROMOTER_PCT,
     PROMOTER_PAYOUT_TABLE,
@@ -4364,22 +4362,13 @@ def comprehensive_analysis():
 
 @bp.route("/sync-check-register", methods=["POST"])
 def sync_check_register():
-    """Manually sync the Google Sheet check register into BigQuery."""
-    try:
-        bq_client = bigquery.Client(project=PROJECT_ID)
-        register = CheckRegisterSync(bq_client, DATASET_ID)
-        count = register.sync_from_sheet()
-        return jsonify({
-            "status": "success",
-            "rows_synced": count,
-            "sheet_id": CHECK_REGISTER_SHEET_ID,
-        })
-    except GoogleHttpError as e:
-        logger.error(f"Google Sheets API error: {e}")
-        return jsonify({"error": f"Google Sheets API error: {e}"}), 502
-    except Exception as e:
-        logger.error(f"Check register sync failed: {e}")
-        return jsonify({"error": str(e)}), 500
+    """DECOMMISSIONED 2026-08-01: the sheet register is frozen. The
+    lov3checks app (checks.lov3htx.com) MERGEs new checks into the
+    CheckRegister table directly."""
+    return jsonify({
+        "error": "Sheet sync decommissioned — the check register moved to "
+                 "checks.lov3htx.com, which writes CheckRegister directly.",
+    }), 410
 
 
 @bp.route("/upload-check-register", methods=["POST"])
@@ -4416,9 +4405,11 @@ def reconcile_checks():
     try:
         bq_client = bigquery.Client(project=PROJECT_ID)
 
+        # Sheet sync removed 2026-08-01 — lookup reads the CheckRegister
+        # table, which the lov3checks app keeps current.
         register_sync = CheckRegisterSync(bq_client, DATASET_ID)
-        synced = register_sync.sync_from_sheet()
         check_lookup = register_sync.get_lookup()
+        synced = len(check_lookup)
 
         cat_manager = BankCategoryManager(bq_client, DATASET_ID)
         rules = cat_manager.list_rules()
