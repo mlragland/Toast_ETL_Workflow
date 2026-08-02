@@ -355,7 +355,65 @@ class PlaidSync:
             """
             job = self.bq.query(merge_sql)
             job.result()
-            return job.num_dml_affected_rows or 0
+            merged_rows = job.num_dml_affected_rows or 0
+
+            # Cross-source dedup: after MERGE, remove non-Plaid rows that
+            # represent the same real-world transaction as a Plaid row we
+            # just landed. Root cause of the 2026-07-30 backfill dupes:
+            # Plaid writes description="First Insurance" (clean) while
+            # Teller/CSV had description="FIRST INSURANCE DES:INSURANCE ID:
+            # 900-106804420 INDN:..." (raw ACH descriptor) — same date +
+            # amount + vendor but different description → primary MERGE
+            # misses → both persist.
+            #
+            # Safeguards to avoid nuking legitimate distinct transactions
+            # that happen to share amount + vendor + day (e.g., two Amazon
+            # orders same day for same amount, two tax filings, two CC
+            # payments):
+            #   1. Only delete rows where category_source != 'plaid' (never
+            #      touch a Plaid row).
+            #   2. Require a Plaid twin in the just-loaded staging batch
+            #      with matching (date, amount, vendor_normalized).
+            #   3. Require vendor_normalized to be non-null on both sides
+            #      (skip generic uncategorized).
+            #   4. Require the non-Plaid side to have exactly one row for
+            #      that (date, amount, vendor) tuple. If two or more legit
+            #      non-Plaid rows share the tuple, leave them alone rather
+            #      than risk destroying a real transaction.
+            dedup_sql = f"""
+            DELETE FROM `{BANK_TABLE}` T
+            WHERE T.category_source != 'plaid'
+              AND T.vendor_normalized IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM `{staging}` S
+                WHERE S.transaction_date = T.transaction_date
+                  AND CAST(ROUND(S.amount, 2) AS NUMERIC) =
+                      CAST(ROUND(T.amount, 2) AS NUMERIC)
+                  AND S.vendor_normalized IS NOT NULL
+                  AND S.vendor_normalized = T.vendor_normalized
+                  AND S.category_source = 'plaid'
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM `{BANK_TABLE}` T2
+                WHERE T2.category_source != 'plaid'
+                  AND T2.transaction_date = T.transaction_date
+                  AND CAST(ROUND(T2.amount, 2) AS NUMERIC) =
+                      CAST(ROUND(T.amount, 2) AS NUMERIC)
+                  AND T2.vendor_normalized = T.vendor_normalized
+                  AND (T2.description != T.description
+                       OR T2.upload_batch_id != T.upload_batch_id)
+              )
+            """
+            dedup_job = self.bq.query(dedup_sql)
+            dedup_job.result()
+            dedup_rows = dedup_job.num_dml_affected_rows or 0
+            if dedup_rows:
+                logger.info(
+                    "Cross-source dedup removed %d non-Plaid twin rows",
+                    dedup_rows,
+                )
+
+            return merged_rows
         finally:
             try:
                 self.bq.delete_table(staging, not_found_ok=True)
