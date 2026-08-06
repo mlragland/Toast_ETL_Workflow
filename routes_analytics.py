@@ -4771,6 +4771,42 @@ def api_plaid_exchange():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── Weekly Afrikan Billionaires Promoter Payout ───────────────────────────
+
+@bp.route("/api/promoter-payout-afrikan-weekly", methods=["POST"])
+def api_promoter_payout_afrikan_weekly():
+    """Weekly Afrikan Billionaires promoter payout — compute + PDF + notify.
+
+    Called by Cloud Scheduler (Tuesday 12 PM CT) and on demand. Computes the
+    last completed Thursday's 11 PM–2 AM payout at half-standard COGS + tax,
+    20% promoter rate. Saves PDF to Dropbox + GCS, emails Kelvin/Eddie/Maurice,
+    SMS Maurice + Eddie via Twilio.
+
+    Accepts optional JSON body {"force_date": "YYYY-MM-DD"} to re-run a past
+    Thursday. Same auth pattern as /api/comp-report.
+    """
+    import os
+
+    auth_header = request.headers.get("Authorization", "")
+    scheduler = request.headers.get("X-Scheduler-Source", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or scheduler or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    try:
+        body = request.get_json(silent=True) or {}
+        force_date = body.get("force_date")
+        from promoter_payout_afrikan import run_weekly
+        result = run_weekly(force_date=force_date)
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"Afrikan promoter payout error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 # ─── Weekly Comp Report Slack API ────────────────────────────────────────────
 
 @bp.route("/api/comp-report", methods=["POST"])
