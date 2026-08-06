@@ -519,15 +519,25 @@ def send_email(pdf: bytes, event_date: date, calc: Dict) -> Dict:
 
 
 def send_sms(event_date: date, calc: Dict) -> Dict:
-    """SMS Maurice + Eddie via Twilio. Best-effort."""
+    """SMS Maurice + Eddie via Twilio. Best-effort.
+
+    Prefers TWILIO_MESSAGING_SERVICE_SID (MG…) over TWILIO_FROM_NUMBER — the
+    Messaging Service handles the number pool + carrier registration + compliance
+    automatically, matching how sms_blast_system sends. Falls back to a raw
+    From number if the Messaging Service SID isn't set.
+    """
     result = {"attempted": False, "recipients": [], "error": None}
     account_sid = _get_secret("twilio-account-sid")
     auth_token = _get_secret("twilio-auth-token")
-    from_number = os.environ.get("TWILIO_FROM_NUMBER") or _get_secret("twilio-from-number")
+    messaging_service_sid = _get_secret("twilio-messaging-service-sid")
+    from_number = (os.environ.get("TWILIO_FROM_NUMBER")
+                   or _get_secret("twilio-from-number"))
 
-    if not (account_sid and auth_token and from_number):
-        result["error"] = ("Twilio not configured — need twilio-account-sid + "
-                           "twilio-auth-token secrets and TWILIO_FROM_NUMBER env var")
+    if not (account_sid and auth_token and (messaging_service_sid or from_number)):
+        result["error"] = (
+            "Twilio not configured — need twilio-account-sid + twilio-auth-token "
+            "and either twilio-messaging-service-sid OR twilio-from-number"
+        )
         return result
 
     result["attempted"] = True
@@ -545,9 +555,13 @@ def send_sms(event_date: date, calc: Dict) -> Dict:
         row = {"name": name, "to": phone, "sent": False,
                "sid": None, "error": None}
         try:
+            data = {"To": phone, "Body": body}
+            if messaging_service_sid:
+                data["MessagingServiceSid"] = messaging_service_sid
+            else:
+                data["From"] = from_number
             resp = requests.post(
-                url,
-                data={"From": from_number, "To": phone, "Body": body},
+                url, data=data,
                 auth=(account_sid, auth_token),
                 timeout=30,
             )
