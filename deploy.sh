@@ -12,6 +12,15 @@ DATASET_ID="toast_raw"
 SERVICE_ACCOUNT_NAME="toast-etl-scheduler"
 SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:?Set SLACK_WEBHOOK_URL env var before deploying}"
 
+# --set-env-vars below REPLACES all env vars on the service, so the dashboard
+# key must be carried through every deploy. Inherit from the live service if
+# not provided; abort rather than silently deploy a public dashboard.
+if [ -z "$DASHBOARD_KEY" ]; then
+    DASHBOARD_KEY=$(gcloud run services describe $SERVICE_NAME --region $REGION --format=json 2>/dev/null | \
+        python3 -c "import json,sys; envs=json.load(sys.stdin)['spec']['template']['spec']['containers'][0].get('env',[]); print(next((e['value'] for e in envs if e['name']=='DASHBOARD_KEY'),''))" || true)
+fi
+DASHBOARD_KEY="${DASHBOARD_KEY:?DASHBOARD_KEY not set locally and not found on the live service — refusing to deploy public dashboards}"
+
 echo "=========================================="
 echo "Toast ETL Pipeline Deployment"
 echo "=========================================="
@@ -102,7 +111,7 @@ gcloud run deploy $SERVICE_NAME \
     --timeout 600 \
     --min-instances 0 \
     --max-instances 3 \
-    --set-env-vars "GCP_PROJECT=${PROJECT_ID},BQ_DATASET=${DATASET_ID},SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}" \
+    --set-env-vars "GCP_PROJECT=${PROJECT_ID},BQ_DATASET=${DATASET_ID},SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL},DASHBOARD_KEY=${DASHBOARD_KEY}" \
     --no-allow-unauthenticated
 
 # Get the Cloud Run URL

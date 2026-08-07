@@ -47,6 +47,37 @@ class TestDashboardAuth:
             resp = client.get("/bank-review")
             assert resp.status_code == 200
 
+    def test_bearer_header_does_not_unlock_dashboards(self, client):
+        """Unvalidated Bearer tokens must not bypass the key on dashboard pages."""
+        with patch("main.DASHBOARD_KEY", "secret123"):
+            resp = client.get(
+                "/bank-review",
+                headers={"Authorization": "Bearer anything"},
+            )
+            assert resp.status_code == 403
+
+    def test_scheduler_header_does_not_unlock_dashboards(self, client):
+        """X-Scheduler-Source must not bypass the key on dashboard pages."""
+        with patch("main.DASHBOARD_KEY", "secret123"):
+            resp = client.get(
+                "/bank-review",
+                headers={"X-Scheduler-Source": "cloud-scheduler"},
+            )
+            assert resp.status_code == 403
+
+    def test_bearer_still_passes_gate_on_scheduler_paths(self, client):
+        """Scheduler job routes still clear the dashboard gate with a Bearer header.
+
+        GET /run reaches routing (405: route is POST-only) instead of the
+        gate's 403 — proving the gate let it through without running the ETL.
+        """
+        with patch("main.DASHBOARD_KEY", "secret123"):
+            resp = client.get(
+                "/run",
+                headers={"Authorization": "Bearer scheduler-token"},
+            )
+            assert resp.status_code == 405
+
 
 class TestAnalyticsCache:
     """In-memory cache for analytics endpoints."""

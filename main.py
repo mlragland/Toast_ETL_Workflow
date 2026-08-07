@@ -16,6 +16,20 @@ from routes_analytics import bp as analytics_bp
 # Dashboard access key — when set, all non-health routes require ?key= or X-Dashboard-Key header
 DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "")
 
+# Paths Cloud Scheduler invokes with an OIDC Bearer token. Only these may
+# bypass the dashboard key — never the dashboard/report pages themselves.
+SCHEDULER_PATHS = frozenset({
+    "/run",
+    "/backfill",
+    "/weekly-report",
+    "/gratuity-report",
+    "/api/promoter-payout-afrikan-weekly",
+    "/api/prime-cost-alert",
+    "/api/comp-report",
+    "/api/plaid-sync",
+    "/api/teller-sync",
+})
+
 
 # ─── Structured JSON logging for Cloud Run ─────────────────────────────────
 class StructuredFormatter(logging.Formatter):
@@ -92,11 +106,14 @@ def _check_dashboard_key():
     if key == DASHBOARD_KEY:
         return
 
-    # Allow if Bearer token or scheduler header present (for ETL routes)
-    if request.headers.get("Authorization", "").startswith("Bearer "):
-        return
-    if request.headers.get("X-Scheduler-Source"):
-        return
+    # Allow Bearer/scheduler headers ONLY on scheduler-invoked job routes;
+    # these headers are not validated here (require_auth + Cloud Run IAM
+    # handle that), so they must never unlock dashboard pages.
+    if request.path in SCHEDULER_PATHS:
+        if request.headers.get("Authorization", "").startswith("Bearer "):
+            return
+        if request.headers.get("X-Scheduler-Source"):
+            return
 
     return jsonify({"error": "Access denied. Provide ?key= parameter or X-Dashboard-Key header."}), 403
 
