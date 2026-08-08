@@ -1,21 +1,31 @@
 """
 Weekly Report Generator for LOV3 Houston
-Generates and sends weekly summary reports via email using SendGrid
+Generates and sends weekly summary reports via Slack (primary) or email (fallback).
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
+import requests
 from google.cloud import bigquery
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail, Email, To, Content
+
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail, Email, To, Content
+    HAS_SENDGRID = True
+except ImportError:
+    HAS_SENDGRID = False
 
 from config import (
     PROJECT_ID, DATASET_ID, BUSINESS_DAY_SQL, BUSINESS_DOW_SQL,
     GRAT_RETAIN_PCT, GRAT_PASSTHROUGH_PCT, REPORT_EMAIL,
+    ALERT_WEBHOOK_URL,
 )
 from services import SecretManager
+
+SLACK_REPORT_CHANNEL_WEBHOOK = os.environ.get("SLACK_REPORT_WEBHOOK", ALERT_WEBHOOK_URL)
 
 logger = logging.getLogger(__name__)
 
@@ -1855,7 +1865,10 @@ class WeeklyReportGenerator:
         return html
 
     def send_email(self, to_email: str, subject: str, html_content: str) -> bool:
-        """Send email via SendGrid API"""
+        """Send email via SendGrid API (fallback if Slack fails)"""
+        if not HAS_SENDGRID:
+            logger.warning("SendGrid not installed — skipping email")
+            return False
         try:
             api_key = self.secret_manager.get_secret("sendgrid-api-key")
 
@@ -1874,10 +1887,110 @@ class WeeklyReportGenerator:
 
         except Exception as e:
             logger.error(f"Failed to send email: {e}")
-            raise
+            return False
+
+    def build_slack_message(
+        self, start_date: str, end_date: str,
+        revenue: Dict, orders: Dict, top_items: Dict,
+        servers: List[Dict], daily: List[Dict], wow: Dict,
+        scorecard: Dict,
+    ) -> str:
+        """Build a Slack-formatted weekly report message."""
+        total_rev = revenue.get("grand_total", 0)
+        total_orders = orders.get("total_orders", 0)
+        total_guests = orders.get("total_guests", 0)
+        avg_check = total_rev / total_orders if total_orders else 0
+        wow_pct = wow.get("changes", {}).get("revenue_pct", 0)
+        prev_rev = wow.get("prior", {}).get("revenue", 0)
+        arrow = "+" if wow_pct >= 0 else ""
+        wow_emoji = ":chart_with_upwards_trend:" if wow_pct >= 0 else ":chart_with_downwards_trend:"
+
+        tips = revenue.get("total_tips", 0)
+        grat = revenue.get("total_gratuity", 0)
+
+        msg = f"*:bar_chart: LOV3 Weekly Report: {start_date} to {end_date}*\n\n"
+
+        # Revenue summary
+        msg += "*Revenue Summary*\n"
+        msg += f"> :moneybag: *Net Sales:* ${total_rev:,.0f}\n"
+        msg += f"> :receipt: *Orders:* {total_orders:,} | *Guests:* {total_guests:,}\n"
+        msg += f"> :dollar: *Avg Check:* ${avg_check:,.2f}\n"
+        msg += f"> {wow_emoji} *Week over Week:* {arrow}{wow_pct:.1f}% (prev week ${prev_rev:,.0f})\n"
+        msg += f"> :money_with_wings: *Tips:* ${tips:,.0f} | *Service Charge:* ${grat:,.0f}\n"
+
+        # Daily breakdown
+        msg += "\n*Daily Breakdown*\n"
+        for d in daily:
+            day_name = d.get("day_name", "")[:3]
+            day_date = d.get("date", "")
+            day_rev = d.get("revenue", 0)
+            day_orders = d.get("orders", 0)
+            hearts = ":green_heart:" * min(int(day_rev / 1000), 20)
+            msg += f"> *{day_name}* {day_date} — ${day_rev:,.0f} ({day_orders} orders) {hearts}\n"
+
+        # Top servers
+        msg += "\n*Top 10 Servers*\n"
+        for i, s in enumerate(servers[:10], 1):
+            name = s.get("server", "")
+            sales = s.get("net_sales", 0)
+            s_orders = s.get("orders", 0)
+            s_tips = s.get("tips", 0)
+            msg += f"> {i}. *{name}* — ${sales:,.0f} ({s_orders} orders, ${s_tips:,.0f} tips)\n"
+
+        # Top items
+        msg += "\n*Top 10 Items*\n"
+        items_list = top_items.get("items", []) if isinstance(top_items, dict) else top_items
+        for i, item in enumerate(items_list[:10], 1):
+            name = item.get("item", item.get("menu_item", ""))
+            menu = item.get("menu", item.get("menu_name", ""))
+            sales = item.get("net_sales", item.get("net_amount", 0))
+            qty = item.get("qty", item.get("item_qty", 0))
+            msg += f"> {i}. *{name}* ({menu}) — ${sales:,.0f} ({qty:.0f} sold)\n"
+
+        # Scorecard if available
+        if scorecard:
+            grade = scorecard.get("grade", "")
+            score = scorecard.get("score", 0)
+            if grade:
+                msg += f"\n*Weekly Scorecard:* {grade} ({score}/100)\n"
+
+        return msg
+
+    def send_slack_report(self, message: str) -> bool:
+        """Send weekly report to Slack via webhook."""
+        webhook_url = SLACK_REPORT_CHANNEL_WEBHOOK
+        if not webhook_url:
+            logger.warning("No Slack webhook configured — skipping Slack delivery")
+            return False
+
+        payload = {
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": block}
+                }
+                for block in message.split("\n\n") if block.strip()
+            ]
+        }
+
+        # Slack blocks have a 3000 char limit per block — fall back to simple text if needed
+        if any(len(b["text"]["text"]) > 2900 for b in payload["blocks"]):
+            payload = {"text": message}
+
+        try:
+            resp = requests.post(webhook_url, json=payload, timeout=15)
+            if resp.status_code == 200:
+                logger.info("Weekly report sent to Slack successfully")
+                return True
+            else:
+                logger.error(f"Slack webhook returned {resp.status_code}: {resp.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to send Slack report: {e}")
+            return False
 
     def generate_and_send_report(self, week_ending: str = None, to_email: str = None) -> Dict:
-        """Generate and send the weekly report"""
+        """Generate and send the weekly report via Slack (primary) and email (fallback)."""
         start_date, end_date = self.get_week_dates(week_ending)
 
         logger.info(f"Generating weekly report for {start_date} to {end_date}")
@@ -1900,7 +2013,14 @@ class WeeklyReportGenerator:
         ops_efficiency = self.query_operational_efficiency(start_date, end_date)
         scorecard = self.query_weekly_scorecard(start_date, end_date)
 
-        # Generate HTML
+        # Send via Slack (primary)
+        slack_msg = self.build_slack_message(
+            start_date, end_date,
+            revenue, orders, top_items, servers, daily, wow, scorecard,
+        )
+        slack_success = self.send_slack_report(slack_msg)
+
+        # Generate HTML and send email (fallback)
         html = self.generate_html_report(
             start_date, end_date,
             revenue, orders, top_items, servers, daily, payments, wow,
@@ -1908,14 +2028,24 @@ class WeeklyReportGenerator:
             cash_control, cash_handlers, ops_efficiency, scorecard
         )
 
-        # Send email
+        email_success = False
         recipient = to_email or REPORT_EMAIL
         subject = f"LOV3 Houston Weekly Report: {start_date} to {end_date}"
+        if not slack_success:
+            # Only try email if Slack failed
+            logger.info("Slack delivery failed — attempting email fallback")
+            try:
+                email_success = self.send_email(recipient, subject, html)
+            except Exception as e:
+                logger.error(f"Email fallback also failed: {e}")
 
-        success = self.send_email(recipient, subject, html)
+        success = slack_success or email_success
+        delivery = "slack" if slack_success else ("email" if email_success else "failed")
+        logger.info(f"Weekly report delivery: {delivery}")
 
         return {
             "success": success,
+            "delivery_method": delivery,
             "week_start": start_date,
             "week_end": end_date,
             "recipient": recipient,
