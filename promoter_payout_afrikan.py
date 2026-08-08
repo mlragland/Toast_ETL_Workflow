@@ -377,16 +377,48 @@ def build_pdf(event_date: date, start_dt: datetime, end_dt: datetime,
 
 # ── Storage: Dropbox + GCS ─────────────────────────────────────────────
 
+def _dropbox_access_token() -> Optional[str]:
+    """Return a currently-valid Dropbox access token.
+
+    If dropbox-refresh-token + dropbox-app-key + dropbox-app-secret are set,
+    exchange the refresh token for a fresh short-lived access token. This is
+    the durable path — refresh tokens don't expire and Dropbox has removed
+    the "No expiration" option for new apps.
+
+    Falls back to dropbox-access-token if the refresh trio isn't configured.
+    """
+    refresh_token = _get_secret("dropbox-refresh-token")
+    app_key = _get_secret("dropbox-app-key")
+    app_secret = _get_secret("dropbox-app-secret")
+    if refresh_token and app_key and app_secret:
+        try:
+            resp = requests.post(
+                "https://api.dropboxapi.com/oauth2/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+                auth=(app_key, app_secret),
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp.json().get("access_token")
+        except Exception as exc:
+            logger.error("Dropbox token refresh failed: %s", exc)
+            return None
+    return _get_secret("dropbox-access-token")
+
+
 def save_to_dropbox(pdf: bytes, event_date: date) -> Dict:
     """Save PDF to Dropbox at the Afrikan Billionaires folder structure.
 
     Returns {"attempted": bool, "sent": bool, "path": str, "error": str}.
-    No-op if dropbox-access-token secret is not set.
+    No-op if no Dropbox credentials are configured.
     """
     result = {"attempted": False, "sent": False, "path": None, "error": None}
-    token = _get_secret("dropbox-access-token")
+    token = _dropbox_access_token()
     if not token:
-        result["error"] = "dropbox-access-token secret not set"
+        result["error"] = "Dropbox not configured (no refresh-token trio or access-token secret)"
         return result
 
     result["attempted"] = True

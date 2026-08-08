@@ -364,11 +364,33 @@ def build_pdf(event_date: date, start_dt: datetime, end_dt: datetime,
     return buf.getvalue()
 
 
+def _dropbox_access_token() -> Optional[str]:
+    """Return a currently-valid Dropbox access token via refresh flow if
+    configured, else the raw dropbox-access-token secret."""
+    refresh_token = _get_secret("dropbox-refresh-token")
+    app_key = _get_secret("dropbox-app-key")
+    app_secret = _get_secret("dropbox-app-secret")
+    if refresh_token and app_key and app_secret:
+        try:
+            resp = requests.post(
+                "https://api.dropboxapi.com/oauth2/token",
+                data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+                auth=(app_key, app_secret),
+                timeout=15,
+            )
+            resp.raise_for_status()
+            return resp.json().get("access_token")
+        except Exception as exc:
+            logger.error("Dropbox token refresh failed: %s", exc)
+            return None
+    return _get_secret("dropbox-access-token")
+
+
 def save_to_dropbox(pdf: bytes, event_date: date) -> Dict:
     result = {"attempted": False, "sent": False, "path": None, "error": None}
-    token = _get_secret("dropbox-access-token")
+    token = _dropbox_access_token()
     if not token:
-        result["error"] = "dropbox-access-token secret not set"
+        result["error"] = "Dropbox not configured"
         return result
     result["attempted"] = True
     folder = f"{event_date.month}_{event_date.day}"
