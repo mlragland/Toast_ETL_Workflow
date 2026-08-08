@@ -4807,6 +4807,42 @@ def api_promoter_payout_afrikan_weekly():
         return jsonify({"error": str(e)}), 500
 
 
+# ─── Weekly LOV3 Always (Black Swan) Promoter Payout ────────────────────────
+
+@bp.route("/api/promoter-payout-lov3-always-weekly", methods=["POST"])
+def api_promoter_payout_lov3_always_weekly():
+    """Weekly LOV3 Always promoter payout — compute + PDF + notify.
+
+    Called by Cloud Scheduler (Tuesday 12 PM CT) and on demand. Computes the
+    last completed Saturday's 12 PM–6 PM payout at half-standard COGS + tax,
+    20% promoter rate for Black Swan. Saves PDF to Dropbox + GCS, emails
+    Maurice + Black Swan + Anno, SMS Maurice + Eddie via Twilio.
+
+    Accepts optional JSON body {"force_date": "YYYY-MM-DD"} to re-run a past
+    Saturday. Same auth pattern as /api/promoter-payout-afrikan-weekly.
+    """
+    import os
+
+    auth_header = request.headers.get("Authorization", "")
+    scheduler = request.headers.get("X-Scheduler-Source", "")
+    admin_key = request.headers.get("X-Admin-Key", "")
+    expected_key = os.environ.get("ADMIN_API_KEY", "")
+
+    if not (auth_header.startswith("Bearer ") or scheduler or
+            (expected_key and admin_key == expected_key)):
+        return jsonify({"error": "Authentication required"}), 401
+
+    try:
+        body = request.get_json(silent=True) or {}
+        force_date = body.get("force_date")
+        from promoter_payout_lov3_always import run_weekly
+        result = run_weekly(force_date=force_date)
+        return jsonify(result), 200
+    except Exception as e:
+        logger.error(f"LOV3 Always promoter payout error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 # ─── Weekly Comp Report Slack API ────────────────────────────────────────────
 
 @bp.route("/api/comp-report", methods=["POST"])
