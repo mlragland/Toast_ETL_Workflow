@@ -275,6 +275,37 @@ def query_expenses_by_category(client: bigquery.Client, start: str, end: str) ->
       SELECT
         month,
         CASE
+          -- 0) Vendor-based overrides — apply BEFORE Plaid category mapping
+          --    because Plaid mislabels these specific vendors.
+          --
+          --    JCS Bar Supplies → bar mixers/glassware/supplies (Plaid tags
+          --    them as HOME_IMPROVEMENT_HARDWARE, but they're COGS).
+          WHEN REGEXP_CONTAINS(LOWER(vendor), r'jcs bar supplies')
+               OR REGEXP_CONTAINS(LOWER(description), r'jcs bar supplies')
+               THEN '2. Cost of Goods Sold/Supplies & Equipment'
+          --    Kraftsmen — bread/bakery supplier (Plaid tags as HOME_IMPROVEMENT).
+          WHEN REGEXP_CONTAINS(LOWER(vendor), r'kraftsmen')
+               OR REGEXP_CONTAINS(LOWER(description), r'kraftsmen')
+               THEN '2. Cost of Goods Sold/Food COGS'
+          --    Kitchens — kitchen equipment supplier (Plaid tags as
+          --    GENERAL_SERVICES_OTHER_GENERAL_SERVICES, but it's Facility CapEx).
+          WHEN REGEXP_CONTAINS(LOWER(vendor), r'^kitchens\b|kitchens\s|the kitchens')
+               THEN '7. Facility & Tenant Improvements/Capital Equipment Expense'
+          --    Wave — event ticketing platform (Plaid tags as
+          --    GENERAL_SERVICES_OTHER_GENERAL_SERVICES, but it's Marketing/Event).
+          WHEN REGEXP_CONTAINS(LOWER(vendor), r'^wave\b|^wave$|wave.*unforgett')
+               OR REGEXP_CONTAINS(LOWER(description), r'wave.*unforgett|wave-\*unforgett')
+               THEN '4. Marketing & Promotions Expense/Event Expense'
+          --    Cintas — uniforms + laundry (Plaid tags as GENERAL_SERVICES,
+          --    routes to Professional Services which is wrong).
+          WHEN REGEXP_CONTAINS(LOWER(vendor), r'cintas')
+               OR REGEXP_CONTAINS(LOWER(description), r'cintas')
+               THEN '5. Operating Expenses (OPEX)/Admin & Office'
+          --    Scentair — scent machines (Plaid: HOME_IMPROVEMENT). Small
+          --    subscription-style OPEX, not Facility CapEx.
+          WHEN REGEXP_CONTAINS(LOWER(vendor), r'scentair')
+               THEN '5. Operating Expenses (OPEX)/Software & Subscriptions'
+
           -- 1) Keep the LOV3 numbered taxonomy as-is (highest signal)
           WHEN REGEXP_CONTAINS(category, r'^[0-9]\.') THEN category
 
