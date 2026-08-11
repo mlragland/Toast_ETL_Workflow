@@ -231,7 +231,17 @@ def query_hookah_revenue_pos(client: bigquery.Client, start: str, end: str) -> D
 
 
 # Predictive Insights $20K from Jan 2024 reclassed to Apr 2025 hookah revenue
-HOOKAH_RECLASS = {"2025-04": 20_000.00, "2025-12": 15_000.00, "2026-03": 16_400.00}
+HOOKAH_RECLASS = {
+    "2025-04": 20_000.00,
+    "2025-12": 15_000.00,
+    "2026-03": 16_400.00,
+    # Q2 2026 hookah payments (Predictive Insights) — received off-bank
+    # channels (check/Zelle) per operator; reclassed onto the P&L to
+    # capture full hookah revenue for the SBA package.
+    "2026-04": 16_860.00,
+    "2026-05": 20_785.00,
+    "2026-06": 19_730.00,
+}
 
 
 def query_expenses_by_category(client: bigquery.Client, start: str, end: str) -> Dict[str, Dict[str, float]]:
@@ -732,6 +742,14 @@ def main():
     # Period 2: Jan–Mar 2026 Interim
     months_2026, data_2026, ytd_2026 = query_period(client, "2026-01-01", "2026-03-31")
 
+    # Period 3: Apr–Jun 2026 Q2 Interim
+    months_q2_2026, data_q2_2026, ytd_q2_2026 = query_period(
+        client, "2026-04-01", "2026-06-30")
+
+    # Period 4: H1 2026 YTD (Jan–Jun 2026) — lender wants YTD view too
+    months_h1_2026, data_h1_2026, ytd_h1_2026 = query_period(
+        client, "2026-01-01", "2026-06-30")
+
     wb = Workbook()
     wb.remove(wb.active)  # remove default sheet
 
@@ -741,16 +759,26 @@ def main():
         months_2025, data_2025, ytd_2025,
     )
     write_pnl_sheet(
-        wb, "Mar 2026 Interim P&L",
+        wb, "Q1 2026 P&L",
         "For the Three Months Ended March 31, 2026",
         months_2026, data_2026, ytd_2026,
+    )
+    write_pnl_sheet(
+        wb, "Q2 2026 P&L",
+        "For the Three Months Ended June 30, 2026",
+        months_q2_2026, data_q2_2026, ytd_q2_2026,
+    )
+    write_pnl_sheet(
+        wb, "H1 2026 YTD P&L",
+        "For the Six Months Ended June 30, 2026",
+        months_h1_2026, data_h1_2026, ytd_h1_2026,
     )
 
     filename = "LOV3_HTX_Financial_Statements_SBA.xlsx"
     wb.save(filename)
     log.info(f"Saved: {filename}")
 
-    # Standalone Q1 2026 file
+    # Standalone Q1 2026 file (kept for continuity)
     wb2 = Workbook()
     wb2.remove(wb2.active)
     write_pnl_sheet(
@@ -762,9 +790,35 @@ def main():
     wb2.save(q1_filename)
     log.info(f"Saved: {q1_filename}")
 
+    # Standalone Q2 2026 file
+    wb3 = Workbook()
+    wb3.remove(wb3.active)
+    write_pnl_sheet(
+        wb3, "Q2 2026 P&L",
+        "For the Three Months Ended June 30, 2026",
+        months_q2_2026, data_q2_2026, ytd_q2_2026,
+    )
+    q2_filename = "LOV3_HTX_Q2_2026_PL.xlsx"
+    wb3.save(q2_filename)
+    log.info(f"Saved: {q2_filename}")
+
+    # Standalone H1 2026 YTD file (for lender's YTD view)
+    wb4 = Workbook()
+    wb4.remove(wb4.active)
+    write_pnl_sheet(
+        wb4, "H1 2026 YTD P&L",
+        "For the Six Months Ended June 30, 2026",
+        months_h1_2026, data_h1_2026, ytd_h1_2026,
+    )
+    h1_filename = "LOV3_HTX_H1_2026_YTD_PL.xlsx"
+    wb4.save(h1_filename)
+    log.info(f"Saved: {h1_filename}")
+
     print(f"\nDone! Files saved:")
     print(f"  {filename}")
     print(f"  {q1_filename}")
+    print(f"  {q2_filename}")
+    print(f"  {h1_filename}")
 
 
 if __name__ == "__main__":
