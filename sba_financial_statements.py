@@ -389,8 +389,26 @@ def query_expenses_by_category(client: bigquery.Client, start: str, end: str) ->
                THEN '2. Cost of Goods Sold/Food COGS'
           WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
                AND REGEXP_CONTAINS(LOWER(description),
-                    r'miami gardens|las vegas|k kel next to|lincoln capital')
+                    r'miami gardens|las vegas|k kel next to|lincoln capital|bowlmor')
                THEN '6. General & Administrative / Corporate/Owner Discretionary Expenses'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(description), r'vendome|owner travel')
+               THEN '6. General & Administrative / Corporate/Owner Travel'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(description), r'tst\* ?lov3|lov3 restaur')
+               THEN '6. General & Administrative / Corporate/Personal Meals'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(description), r'sba loan|loan payment|loan svc')
+               THEN '6. General & Administrative / Corporate/Credit Card Payments'
+          -- Event vendors / performers previously left in Uncategorized bucket
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(description),
+                    r'wave.*unforgett|unforgettable|emerging 100')
+               THEN '4. Marketing & Promotions Expense/Event Expense'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND (REGEXP_CONTAINS(LOWER(vendor), r'aren andoun|omari joseph')
+                    OR REGEXP_CONTAINS(LOWER(description), r'aren andoun|omari joseph'))
+               THEN '4. Marketing & Promotions Expense/PMG Artist Booking'
           WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
                AND REGEXP_CONTAINS(LOWER(description), r'^check ')
                THEN '5. Operating Expenses (OPEX)/Bussers & Cleaners'
