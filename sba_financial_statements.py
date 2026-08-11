@@ -494,7 +494,13 @@ def query_cash_undeposited(client: bigquery.Client, start: str, end: str) -> Dic
     collected = {r.month: float(r.cash_collected or 0)
                  for r in client.query(q_collected, job_config=_make_date_config(start, end)).result()}
 
-    # Cash deposited at bank
+    # Cash deposited at bank — includes THREE patterns:
+    #   1. Direct cash deposits ("cash deposit", "counter credit")
+    #   2. Cash routed through Maurice's separate accounts (CHK 0227,
+    #      CHK 9121) then transferred to operating. Per operator: these
+    #      transfers-in typically fund payroll and originate from
+    #      cash collected at LOV3.
+    #   3. Plaid's TRANSFER_IN_ACCOUNT_TRANSFER category for the same flows.
     q_deposited = f"""
     SELECT
         FORMAT_DATE('%Y-%m', transaction_date) AS month,
@@ -502,9 +508,19 @@ def query_cash_undeposited(client: bigquery.Client, start: str, end: str) -> Dic
     FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
     WHERE transaction_date BETWEEN @start_date AND @end_date
         AND transaction_type = 'credit'
-        AND (LOWER(category) LIKE '%cash deposit%'
+        AND (
+             -- Method 1: direct cash deposits
+             LOWER(category) LIKE '%cash deposit%'
              OR LOWER(category) LIKE '%cash account transfer%'
-             OR LOWER(description) LIKE '%counter credit%')
+             OR LOWER(description) LIKE '%counter credit%'
+             -- Method 2: online-banking transfers in from Maurice's other
+             -- LOV3 accounts (cash → reserve → operating). CHK 0227 and
+             -- CHK 9121 are the two known intermediary accounts.
+             OR LOWER(description) LIKE '%online banking transfer from chk 0227%'
+             OR LOWER(description) LIKE '%online banking transfer from chk 9121%'
+             -- Method 3: Plaid's transfer-in category for the same flows
+             OR category = 'TRANSFER_IN_ACCOUNT_TRANSFER'
+        )
     GROUP BY month ORDER BY month
     """
     deposited = {r.month: float(r.cash_deposited or 0)
