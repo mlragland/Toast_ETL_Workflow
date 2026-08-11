@@ -245,15 +245,164 @@ HOOKAH_RECLASS = {
 
 
 def query_expenses_by_category(client: bigquery.Client, start: str, end: str) -> Dict[str, Dict[str, float]]:
-    """Monthly expenses grouped by bank category."""
+    """Monthly expenses grouped by bank category, with a normalization pass
+    that maps Plaid's ALL_CAPS_UNDERSCORE taxonomy AND vendor-based fallbacks
+    onto the LOV3 numbered taxonomy the keyword mapping expects.
+
+    The Plaid taxonomy started appearing in BankTransactions_raw when the
+    Plaid pipeline went live on 2026-07-30 (backfilled Jan onward). The
+    original LOV3 numbered taxonomy ("1. Revenue Recognition/…", "5. Operating
+    Expenses (OPEX)/Rent / CAM / …") continued being used for pre-existing
+    rows. Post-2026-07-30 rows in Q1 also carry Plaid categories.
+
+    Without this normalization, Marketing dropped 63% and G&A dropped 48%
+    quarter-over-quarter — not because spend fell, but because the Plaid-
+    categorized rows fell into "Uncategorized" and got dropped.
+    """
     q = f"""
-    SELECT
-        FORMAT_DATE('%Y-%m', transaction_date) AS month,
-        category,
-        ROUND(SUM(abs_amount), 2) AS total
-    FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
-    WHERE transaction_date BETWEEN @start_date AND @end_date
-        AND transaction_type = 'debit'
+    WITH raw AS (
+      SELECT
+          FORMAT_DATE('%Y-%m', transaction_date) AS month,
+          category,
+          COALESCE(vendor_normalized, '') AS vendor,
+          COALESCE(description, '') AS description,
+          abs_amount
+      FROM `{PROJECT_ID}.{DATASET_ID}.BankTransactions_raw`
+      WHERE transaction_date BETWEEN @start_date AND @end_date
+          AND transaction_type = 'debit'
+    ),
+    normalized AS (
+      SELECT
+        month,
+        CASE
+          -- 1) Keep the LOV3 numbered taxonomy as-is (highest signal)
+          WHEN REGEXP_CONTAINS(category, r'^[0-9]\.') THEN category
+
+          -- 2) Plaid taxonomy → LOV3 destination
+          WHEN category = 'FOOD_AND_DRINK_BEER_WINE_AND_LIQUOR'
+               THEN '2. Cost of Goods Sold/Liquor / Beverage COGS'
+          WHEN category IN ('FOOD_AND_DRINK_GROCERIES')
+               THEN '2. Cost of Goods Sold/Food COGS'
+          WHEN category IN ('GENERAL_MERCHANDISE_ONLINE_MARKETPLACES',
+                            'GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE',
+                            'GENERAL_MERCHANDISE_SUPERSTORES',
+                            'GENERAL_MERCHANDISE_CONVENIENCE_STORES',
+                            'GENERAL_MERCHANDISE_DEPARTMENT_STORES')
+               THEN '2. Cost of Goods Sold/Supplies & Equipment'
+          WHEN category = 'HOME_IMPROVEMENT_HARDWARE'
+               THEN '5. Operating Expenses (OPEX)/Repairs & Maintenance'
+          WHEN category IN ('HOME_IMPROVEMENT_REPAIR_AND_MAINTENANCE',
+                            'HOME_IMPROVEMENT_OTHER_HOME_IMPROVEMENT')
+               THEN '5. Operating Expenses (OPEX)/Repairs & Maintenance'
+          WHEN category = 'HOME_IMPROVEMENT_SECURITY'
+               THEN '5. Operating Expenses (OPEX)/Security'
+          WHEN category = 'RENT_AND_UTILITIES_RENT'
+               THEN '5. Operating Expenses (OPEX)/Rent / CAM / Property Taxes'
+          WHEN category IN ('RENT_AND_UTILITIES_GAS_AND_ELECTRICITY',
+                            'RENT_AND_UTILITIES_WATER',
+                            'RENT_AND_UTILITIES_SEWAGE_AND_WASTE_MANAGEMENT')
+               THEN '5. Operating Expenses (OPEX)/Utility -- Electric & Gas'
+          WHEN category = 'RENT_AND_UTILITIES_INTERNET_AND_CABLE'
+               THEN '5. Operating Expenses (OPEX)/Phone & Internet'
+          WHEN category = 'RENT_AND_UTILITIES_TELEPHONE'
+               THEN '5. Operating Expenses (OPEX)/Phone & Internet'
+          WHEN category = 'GENERAL_SERVICES_INSURANCE'
+               THEN '5. Operating Expenses (OPEX)/Insurance'
+          WHEN category = 'GENERAL_SERVICES_OTHER_GENERAL_SERVICES'
+               THEN '5. Operating Expenses (OPEX)/Professional Services (Consulting, Accounting, Legal)'
+          WHEN category = 'GENERAL_SERVICES_STORAGE'
+               THEN '5. Operating Expenses (OPEX)/Repairs & Maintenance'
+          WHEN category = 'GENERAL_SERVICES_ACCOUNTING_AND_FINANCIAL_PLANNING'
+               THEN '5. Operating Expenses (OPEX)/Professional Services (Consulting, Accounting, Legal)'
+          WHEN category = 'GENERAL_SERVICES_CONSULTING_AND_LEGAL'
+               THEN '5. Operating Expenses (OPEX)/Professional Services (Consulting, Accounting, Legal)'
+          WHEN category = 'GENERAL_SERVICES_ADVERTISING_AND_MARKETING'
+               THEN '4. Marketing & Promotions Expense/Social Media Marketing'
+          WHEN category = 'GENERAL_SERVICES_AUTOMOTIVE'
+               THEN '6. General & Administrative / Corporate/Transportation'
+          WHEN category = 'GOVERNMENT_AND_NON_PROFIT_TAX_PAYMENT'
+               THEN '5. Operating Expenses (OPEX)/Taxes'
+          WHEN category IN ('GOVERNMENT_AND_NON_PROFIT_OTHER_GOVERNMENT_AND_NON_PROFIT',
+                            'GOVERNMENT_AND_NON_PROFIT_GOVERNMENT_DEPARTMENTS_AND_AGENCIES')
+               THEN '5. Operating Expenses (OPEX)/Permits & Licenses'
+          WHEN category = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
+               THEN '6. General & Administrative / Corporate/Credit Card Payments'
+          WHEN category IN ('LOAN_PAYMENTS_MORTGAGE_PAYMENT',
+                            'LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT',
+                            'LOAN_PAYMENTS_CAR_PAYMENT',
+                            'LOAN_PAYMENTS_PERSONAL_LOAN_PAYMENT')
+               THEN '6. General & Administrative / Corporate/Owner Discretionary Expenses'
+          WHEN category IN ('BANK_FEES_ATM_FEES', 'BANK_FEES_FOREIGN_TRANSACTION_FEES',
+                            'BANK_FEES_INSUFFICIENT_FUNDS', 'BANK_FEES_INTEREST_CHARGE',
+                            'BANK_FEES_OVERDRAFT_FEES', 'BANK_FEES_OTHER_BANK_FEES')
+               THEN '5. Operating Expenses (OPEX)/Bank Fees'
+          WHEN category IN ('ENTERTAINMENT_OTHER_ENTERTAINMENT',
+                            'ENTERTAINMENT_TV_AND_MOVIES',
+                            'ENTERTAINMENT_MUSIC_AND_AUDIO',
+                            'ENTERTAINMENT_VIDEO_GAMES')
+               THEN '4. Marketing & Promotions Expense/Entertainment'
+          WHEN category IN ('ENTERTAINMENT_CASINOS_AND_GAMBLING',
+                            'ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS')
+               THEN '6. General & Administrative / Corporate/Owner Discretionary Expenses'
+          WHEN category IN ('FOOD_AND_DRINK_RESTAURANT', 'FOOD_AND_DRINK_FAST_FOOD',
+                            'FOOD_AND_DRINK_COFFEE', 'FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK')
+               THEN '6. General & Administrative / Corporate/Personal Meals'
+          WHEN category IN ('TRAVEL_FLIGHTS', 'TRAVEL_LODGING', 'TRAVEL_TAXIS_AND_RIDE_SHARES',
+                            'TRAVEL_GAS', 'TRAVEL_PUBLIC_TRANSIT', 'TRAVEL_OTHER_TRAVEL',
+                            'TRAVEL_PARKING', 'TRAVEL_RENTAL_CARS_AND_TAXIS')
+               THEN '6. General & Administrative / Corporate/Owner Travel'
+          -- CHOICE EMPLOYER SOLUTIONS wires are payroll (LOV3's PEO). Route to Labor.
+          WHEN category IN ('TRANSFER_OUT_WIRE', 'TRANSFER_OUT_ACCOUNT_TRANSFER')
+               AND (REGEXP_CONTAINS(UPPER(description), r'CHOICE EMPLOYER')
+                    OR REGEXP_CONTAINS(UPPER(vendor), r'CHOICE EMPLOYER'))
+               THEN '3. Labor Cost (Includes Grat + Tips)/Employee Payroll (FOH, BOH, Salaries & Taxes)'
+          WHEN category IN ('TRANSFER_OUT_WIRE', 'TRANSFER_OUT_ACCOUNT_TRANSFER',
+                            'TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS',
+                            'TRANSFER_OUT_SAVINGS', 'TRANSFER_OUT_WITHDRAWAL',
+                            'TRANSFER_OUT_OTHER_TRANSFER_OUT')
+               THEN '6. General & Administrative / Corporate/Owner Draws (Cash Withdrawals from ATMs & CC)'
+          WHEN category IN ('PERSONAL_CARE_HAIR_AND_BEAUTY', 'PERSONAL_CARE_GYMS_AND_FITNESS_CENTERS',
+                            'PERSONAL_CARE_OTHER_PERSONAL_CARE', 'PERSONAL_CARE_LAUNDRY_AND_DRY_CLEANING')
+               THEN '6. General & Administrative / Corporate/Owner Discretionary Expenses'
+          WHEN category IN ('MEDICAL_DENTAL_CARE', 'MEDICAL_EYE_CARE', 'MEDICAL_NURSING_CARE',
+                            'MEDICAL_PHARMACIES_AND_SUPPLEMENTS', 'MEDICAL_PRIMARY_CARE',
+                            'MEDICAL_VETERINARY_SERVICES', 'MEDICAL_OTHER_MEDICAL')
+               THEN '6. General & Administrative / Corporate/Owner Discretionary Expenses'
+
+          -- 3) Uncategorized fallback → route by vendor / description signal
+          --    (Uncategorized was a $245K bucket in H1 before this pass.)
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND (REGEXP_CONTAINS(LOWER(vendor), r'kelvin boj')
+                    OR REGEXP_CONTAINS(LOWER(description), r'kelvin boj|promoter'))
+               THEN '4. Marketing & Promotions Expense/Promoter Payout'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(description),
+                    r'\\bdj\\b|djeric|dj eric|d\\.j\\.|artist booking')
+               THEN '4. Marketing & Promotions Expense/PMG Artist Booking'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(vendor),
+                    r'seaton|jankowski|charlie pena|zo frost')
+               THEN '5. Operating Expenses (OPEX)/Contract Labor'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(description),
+                    r'food and beverag|sysco|rndc|southern glazer|lonestar fruit|spec.s family')
+               THEN '2. Cost of Goods Sold/Food COGS'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(description),
+                    r'miami gardens|las vegas|k kel next to|lincoln capital')
+               THEN '6. General & Administrative / Corporate/Owner Discretionary Expenses'
+          WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
+               AND REGEXP_CONTAINS(LOWER(description), r'^check ')
+               THEN '5. Operating Expenses (OPEX)/Bussers & Cleaners'
+
+          -- 4) Otherwise keep as-is (will still fall into Other/Uncategorized bucket)
+          ELSE COALESCE(NULLIF(category, ''), 'Uncategorized')
+        END AS category,
+        abs_amount
+      FROM raw
+    )
+    SELECT month, category, ROUND(SUM(abs_amount), 2) AS total
+    FROM normalized
     GROUP BY month, category
     ORDER BY month, total DESC
     """
@@ -536,9 +685,12 @@ def query_period(client: bigquery.Client, start: str, end: str) -> Tuple[List[st
     cash_undeposited = query_cash_undeposited(client, start, end)
     expenses = query_expenses_by_category(client, start, end)
 
-    # Apply hookah reclass (Predictive Insights $20K from Jan 2024 → Apr 2025)
+    # Apply hookah reclass. Compare on YYYY-MM only — the previous
+    # start <= m <= end check silently dropped the first month of any
+    # period that started on the 1st (e.g., "2026-04-01" > "2026-04" in
+    # lexicographic order, so April was skipped in the standalone Q2 P&L).
     for m, amt in HOOKAH_RECLASS.items():
-        if start <= m <= end:
+        if start[:7] <= m <= end[:7]:
             hookah_bank[m] = hookah_bank.get(m, 0) + amt
 
     all_months = sorted(set(
