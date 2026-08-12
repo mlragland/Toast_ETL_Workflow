@@ -288,6 +288,13 @@ def query_expenses_by_category(client: bigquery.Client, start: str, end: str) ->
           WHEN REGEXP_CONTAINS(LOWER(vendor), r'kraftsmen')
                OR REGEXP_CONTAINS(LOWER(description), r'kraftsmen')
                THEN '2. Cost of Goods Sold/Food COGS'
+          --    Restaurant supply vendors — paper goods, smallwares, gloves,
+          --    take-out packaging. NOT Food COGS. They should sit in the
+          --    Supplies & Equipment sub-line. Plaid + numbered categories
+          --    both mis-route Webstaurant/Ace Mart to Food COGS.
+          WHEN REGEXP_CONTAINS(LOWER(vendor), r'webstaurant|ace mart|restaurant depot')
+               OR REGEXP_CONTAINS(LOWER(description), r'the webstaurant|ace mart')
+               THEN '2. Cost of Goods Sold/Supplies & Equipment'
           --    Kitchens — kitchen equipment supplier (Plaid tags as
           --    GENERAL_SERVICES_OTHER_GENERAL_SERVICES, but it's Facility CapEx).
           WHEN REGEXP_CONTAINS(LOWER(vendor), r'^kitchens\b|kitchens\s|the kitchens')
