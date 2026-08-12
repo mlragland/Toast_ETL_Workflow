@@ -94,10 +94,11 @@ SALES_TAX_PAYABLE_POST_ADJ = (
     - SUBSEQUENT_EVENT_TAX_REMITTED
 )
 
-# Q2 P&L headline (from LOV3_HTX_Q2_2026_PL.xlsx after all fixes)
-Q2_REPORTED_EBITDA = 216573.0
-Q2_ADJUSTED_EBITDA_DEFINITE = 321414.0   # + owner draws + personal meals + CC pmts + capex + construction
-Q2_ADJUSTED_EBITDA_FULL = 367829.0       # + owner discretionary
+# Q2 P&L headline (from LOV3_HTX_Q2_2026_PL.xlsx after all fixes,
+# including food-vendor cross-source dedup applied 2026-08-12)
+Q2_REPORTED_EBITDA = 266777.0
+Q2_ADJUSTED_EBITDA_DEFINITE = 371619.0   # + owner draws + personal meals + CC pmts + capex + construction
+Q2_ADJUSTED_EBITDA_FULL = 418034.0       # + owner discretionary
 
 # Q2 depreciation
 Q2_DEPRECIATION = 2319.0            # straight-line — $9,278 annual / 4 = $2,319/qtr
