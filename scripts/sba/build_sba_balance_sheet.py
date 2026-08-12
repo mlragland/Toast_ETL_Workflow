@@ -141,13 +141,19 @@ Q2_CLOSE = {
 # Then we solve for Q2 total distributions given the known Net Income
 # and the equity change from asset/liability roll-forward.
 
-# Q2 Cash Distributions (Cash Sales that went to owners, not the safe)
-# same formula the SBA uses: cash collected − counter credits − entertainment
+# Q2 owner-benefit reconciliation — documented Q2 items (post-operator review):
+#   Direct BofA:      $23,063 (Eddie Zelle $8,500 + Eddie CC $7,198 +
+#                              Derwin via Michelle $1,500 + CHK 0227 $5,865)
+#   Payroll W-2:     ~$80,000 (Maurice + Eddie via CHOICE EMPLOYER — inside
+#                              the $493K payroll wires already on the P&L)
+#   Personal Meals:   $36,286 (on P&L in G&A)
+#   Owner Discretionary: $46,415 (on P&L in G&A)
+#   Note: Lincoln Capital $5,500 is now VIC3 Facility CapEx, NOT owner draw.
+Q2_BOFA_DISTRIBUTIONS = 23063.0  # documented — replaces prior $173K residual
 Q2_CASH_DISTRIBUTIONS = Q2_TOAST_CASH_COLLECTED - Q2_COUNTER_CREDITS - 1500.0
 Q2_ENTERTAINMENT_CASH = 1500.0
 
-# Compute the equity change implied by balance sheet: Q2 Assets − Q2 Liabs − Q1 Equity
-# then work backwards to derive full distributions.
+# Compute equity closing via identity: Assets − Liabilities
 _q2_assets = (Q2_CLOSE["cash"] + Q2_CLOSE["cc_receivable"]
               + Q2_CLOSE["inventory"] + Q2_CLOSE["prepaid"]
               + Q2_CLOSE["ppe_gross"] + Q2_CLOSE["accum_depr"]
@@ -158,11 +164,14 @@ _q2_liab = (Q2_CLOSE["ap"] + Q2_CLOSE["accrued_payroll"]
 Q2_EQUITY_IMPLIED = _q2_assets - _q2_liab
 Q2_EQUITY_CHANGE = Q2_EQUITY_IMPLIED - Q1_CLOSE["equity"]
 
-# Given Net Income and equity change: Distributions = NI − Equity Change
-Q2_TOTAL_DISTRIBUTIONS = Q2_NET_INCOME_SBA - Q2_EQUITY_CHANGE
-# Distributions split: Cash + Entertainment known; solve BofA as residual
-Q2_BOFA_DISTRIBUTIONS = (Q2_TOTAL_DISTRIBUTIONS - Q2_CASH_DISTRIBUTIONS
-                          - Q2_ENTERTAINMENT_CASH)
+# The prior "BofA Distributions" residual absorbed balance-sheet estimation
+# slack (AP / Accrued Payroll / CC Receivable / Inventory / Prepaid are all
+# CPA-estimates). With documented BofA distributions at $23,063 and cash
+# distributions computed, the residual now represents that estimation slack.
+Q2_ESTIMATION_SLACK = (Q2_NET_INCOME_SBA - Q2_EQUITY_CHANGE
+                       - Q2_BOFA_DISTRIBUTIONS
+                       - Q2_CASH_DISTRIBUTIONS
+                       - Q2_ENTERTAINMENT_CASH)
 
 Q2_ACCUMULATED_DEFICIT = Q1_CLOSE["accumulated_deficit"] + Q2_EQUITY_CHANGE
 Q2_EQUITY = Q2_EQUITY_IMPLIED
@@ -498,7 +507,10 @@ _row(ws2, r, "Distributions — Bank / Electronic", ["", "", ""], bold=True, ind
 r += 1
 _row(ws2, r, "  BofA / Zelle / ACH Member Distributions",
      [-450000, -214025.65, -Q2_BOFA_DISTRIBUTIONS],
-     note="Q2 preliminary — SBA methodology captures broader; refresh with detailed wire/ACH review")
+     note=("Q2 = $23,063 DOCUMENTED — Eddie Zelle $8,500 + Eddie personal "
+           "CC pmts $7,198 + Derwin $1,500 + CHK 0227 reserve $5,865. "
+           "(Maurice & Eddie W-2 wages are inside Choice Employer $493K "
+           "payroll wires on the P&L.)"))
 
 r += 2
 _row(ws2, r, "Distributions — Cash (from Toast Cash Collections)", ["", "", ""], bold=True, indent=0)
@@ -512,13 +524,21 @@ _row(ws2, r, "  Entertainment / DJ / Host — Cash Payments",
      note="Direct cash paid to entertainers same convention as Q1")
 
 r += 2
+_row(ws2, r, "Balance-Sheet Estimate Slack (pending CPA refresh)",
+     ["", "", -Q2_ESTIMATION_SLACK],
+     note=("Q2 balancing item — reflects difference between our AP / "
+           "Accrued Payroll / Inventory / Prepaid / CC Payable estimates "
+           "vs actuals. Will be zero once CPA confirms final balance "
+           "sheet inputs. Prior periods (FY25 / Q1) tied to CPA figures."))
+
+r += 2
 FY25_close_calc = 135793.79
 Q1_close_calc = 140256.14
 Q2_close_calc = Q2_EQUITY
 _row(ws2, r, "CLOSING MEMBERS' EQUITY",
      [FY25_close_calc, Q1_close_calc, Q2_close_calc],
      bold=True, fill=FILL_TOTAL,
-     note="Ties to Balance Sheet")
+     note="Ties to Balance Sheet (anchored by Total Assets − Total Liabilities)")
 
 r += 3
 _section(ws2, r, "Cash Collections Reconciliation")

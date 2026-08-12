@@ -438,9 +438,15 @@ def query_expenses_by_category(client: bigquery.Client, start: str, end: str) ->
                AND REGEXP_CONTAINS(LOWER(description),
                     r'food and beverag|sysco|rndc|southern glazer|lonestar fruit|spec.s family')
                THEN '2. Cost of Goods Sold/Food COGS'
+          -- Lincoln Capital Management wire (2026-06-08 $5,500) is a VIC3
+          -- appraisal disbursement per operator — Facility CapEx, not Owner
+          -- Discretionary. Handle before the uncategorized fallback below.
+          WHEN REGEXP_CONTAINS(LOWER(vendor), r'lincoln capital')
+               OR REGEXP_CONTAINS(LOWER(description), r'lincoln capital manag')
+               THEN '7. Facility & Tenant Improvements/Capital Equipment Expense'
           WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
                AND REGEXP_CONTAINS(LOWER(description),
-                    r'miami gardens|las vegas|k kel next to|lincoln capital|bowlmor')
+                    r'miami gardens|las vegas|k kel next to|bowlmor')
                THEN '6. General & Administrative / Corporate/Owner Discretionary Expenses'
           WHEN (category IS NULL OR category = '' OR LOWER(category) = 'uncategorized')
                AND REGEXP_CONTAINS(LOWER(description), r'vendome|owner travel')
