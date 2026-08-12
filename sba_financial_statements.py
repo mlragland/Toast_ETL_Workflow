@@ -263,6 +263,7 @@ def query_expenses_by_category(client: bigquery.Client, start: str, end: str) ->
     WITH raw AS (
       SELECT
           FORMAT_DATE('%Y-%m', transaction_date) AS month,
+          transaction_date,
           category,
           COALESCE(vendor_normalized, '') AS vendor,
           COALESCE(description, '') AS description,
@@ -305,6 +306,18 @@ def query_expenses_by_category(client: bigquery.Client, start: str, end: str) ->
           --    subscription-style OPEX, not Facility CapEx.
           WHEN REGEXP_CONTAINS(LOWER(vendor), r'scentair')
                THEN '5. Operating Expenses (OPEX)/Software & Subscriptions'
+          --    BAED Corporation — LOV3's CPA (as of 2025+) who handles all
+          --    tax payments on behalf of the business. Transfers to BAED's
+          --    account (CHK 4115) fund federal / franchise / property / TABC
+          --    tax obligations. Prior categorization as "Professional
+          --    Services" was technically correct (BAED is a CPA) but the
+          --    economic substance is tax remittance.
+          --    NOTE: 2024 BAED payments were payroll (BAED was the payroll
+          --    processor pre-Choice Employer). Restrict override to 2025+.
+          WHEN (REGEXP_CONTAINS(LOWER(vendor), r'baed')
+                OR REGEXP_CONTAINS(LOWER(description), r'baed corporation'))
+               AND transaction_date >= '2025-01-01'
+               THEN '5. Operating Expenses (OPEX)/Taxes'
 
           -- 1) Keep the LOV3 numbered taxonomy as-is (highest signal)
           WHEN REGEXP_CONTAINS(category, r'^[0-9]\.') THEN category
