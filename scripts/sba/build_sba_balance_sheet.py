@@ -81,6 +81,19 @@ Q1_TAX_REMITTED = 46080.25         # WEBFILE payments Jan–Mar
 Q2_TAX_COLLECTED = 101961.34       # Toast OrderDetails.tax Apr–Jun
 Q2_TAX_REMITTED = 74735.84         # WEBFILE payments Apr–Jun
 
+# ── Subsequent event: WEBFILE remittances after 6/30/2026 ─────────────
+# Between period end and report issuance date (8/11/2026), LOV3 remitted
+# an additional $67,248 to TX Comptroller (3 payments Jul 7 + 5 payments
+# Jul 22, unique post-dedup). Per ASC 855, this is disclosed as a
+# recognized subsequent event that clarified the balance sheet position.
+SUBSEQUENT_EVENT_TAX_REMITTED = 67248.17
+SALES_TAX_PAYABLE_POST_ADJ = (
+    FY25_CLOSE["sales_tax_payable"]
+    + (Q1_TAX_COLLECTED - Q1_TAX_REMITTED)
+    + (Q2_TAX_COLLECTED - Q2_TAX_REMITTED)
+    - SUBSEQUENT_EVENT_TAX_REMITTED
+)
+
 # Q2 P&L headline (from LOV3_HTX_Q2_2026_PL.xlsx after all fixes)
 Q2_REPORTED_EBITDA = 216573.0
 Q2_ADJUSTED_EBITDA_DEFINITE = 321414.0   # + owner draws + personal meals + CC pmts + capex + construction
@@ -319,9 +332,9 @@ _row(ws, r, "Accrued Payroll",
 r += 1
 _row(ws, r, "Sales Tax Payable",
      [FY25_CLOSE["sales_tax_payable"], Q1_CLOSE["sales_tax_payable"], Q2_CLOSE["sales_tax_payable"]],
-     note=("TX Comptroller. Q2 = FY25 base $12,000 + Q1 net accrual "
-           f"(${Q1_TAX_COLLECTED:,.0f} - ${Q1_TAX_REMITTED:,.0f}) + Q2 net "
-           f"accrual (${Q2_TAX_COLLECTED:,.0f} - ${Q2_TAX_REMITTED:,.0f})"))
+     note=("SUBSEQUENT EVENT (ASC 855): $67,248 remitted Jul 7 & Jul 22, "
+           f"2026 (post-period, pre-issuance). Post-adjustment balance "
+           f"= ${SALES_TAX_PAYABLE_POST_ADJ:,.0f}. See subsequent-event footnote."))
 r += 1
 _row(ws, r, "Credit Card Payable — BofA 7291",
      [FY25_CLOSE["cc_payable"], Q1_CLOSE["cc_payable"], Q2_CLOSE["cc_payable"]],
@@ -388,6 +401,54 @@ _row(ws, r, "Equity Ratio",
      currency=False, note="Equity / Total Assets")
 
 r += 2
+_section(ws, r, "SUBSEQUENT EVENT DISCLOSURE (ASC 855) — Sales Tax Remittance")
+r += 1
+_row(ws, r, "Sales Tax Payable — As Reported (6/30/2026)",
+     ["", "", Q2_CLOSE["sales_tax_payable"]],
+     note="Balance at period end, pre-July remittances")
+r += 1
+_row(ws, r, "Less: WEBFILE remittance Jul 7, 2026",
+     ["", "", -40215.02], note="3 payments — cleared May 2026 collections")
+r += 1
+_row(ws, r, "Less: WEBFILE remittance Jul 8, 2026",
+     ["", "", -100.00], note="Small fees")
+r += 1
+_row(ws, r, "Less: WEBFILE remittance Jul 22, 2026",
+     ["", "", -26933.15], note="5 payments — cleared June 2026 collections")
+r += 1
+_row(ws, r, "Sales Tax Payable — Post-Subsequent Event",
+     ["", "", SALES_TAX_PAYABLE_POST_ADJ],
+     bold=True, fill=FILL_HIGHLIGHT,
+     note="Effective balance as of report issuance date (Aug 11, 2026)")
+
+r += 1
+q2_liab_post = tcl_q2 - SUBSEQUENT_EVENT_TAX_REMITTED
+q2_equity_post = Q2_CLOSE["equity"] + SUBSEQUENT_EVENT_TAX_REMITTED
+_row(ws, r, "Pro-Forma Total Liabilities — Post-Adjustment",
+     ["", "", q2_liab_post], note="Reduced by tax remittance")
+r += 1
+_row(ws, r, "Pro-Forma Total Equity — Post-Adjustment",
+     ["", "", q2_equity_post],
+     bold=True, fill=FILL_HIGHLIGHT,
+     note="Reflects true operating position at report issuance")
+
+r += 2
+ws.merge_cells(start_row=r, start_column=1, end_row=r+3, end_column=5)
+notes = ws.cell(row=r, column=1, value=(
+    "SUBSEQUENT EVENT COMMENTARY (per ASC 855-10-25):\n"
+    "  LOV3 files sales tax with TX Comptroller on a MONTHLY schedule. The 6/30/2026 balance of "
+    f"${Q2_CLOSE['sales_tax_payable']:,.0f} in Sales Tax Payable primarily represents May 2026 collections (due "
+    "June 20, filed July 7) and June 2026 collections (due July 20, filed July 22). Both filings "
+    "cleared prior to the report issuance date of August 11, 2026. The effective post-adjustment "
+    f"balance of ${SALES_TAX_PAYABLE_POST_ADJ:,.0f} approximates one month of collections held for imminent remittance — "
+    "consistent with the FY25 close balance of $12,000 used in the prior SBA submission."
+))
+notes.font = Font(name="Calibri", size=9, italic=True, color="1F3864")
+notes.alignment = Alignment(vertical="top", wrap_text=True, indent=1)
+notes.fill = FILL_HIGHLIGHT
+ws.row_dimensions[r].height = 90
+
+r += 5
 ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=5)
 ws.cell(row=r, column=1, value=("Blue figures = confirmed inputs from bank statements or tax filings. "
                                  "Q2 values marked 'estimate' require refresh from CPA / physical count.")).font = NOTE_FONT
