@@ -5169,6 +5169,19 @@ def _promoter_payout_html() -> str:
 """
 
     extra_js = r"""
+(function(){
+  const k = new URLSearchParams(location.search).get('key');
+  if(!k) return;
+  const orig = window.fetch;
+  window.fetch = function(input, init){
+    init = init || {};
+    const h = new Headers(init.headers || {});
+    if(!h.has('X-Dashboard-Key')) h.set('X-Dashboard-Key', k);
+    init.headers = h;
+    return orig(input, init);
+  };
+})();
+
 const $ = id => document.getElementById(id);
 const fmt = n => '$' + Number(n || 0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
