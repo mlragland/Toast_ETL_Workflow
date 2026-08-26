@@ -580,6 +580,23 @@ def run_weekly(force_date: Optional[str] = None) -> Dict:
     sales = fetch_sales(bq, start_dt, end_dt)
     calc = compute_payout(sales)
 
+    # Skip-if-zero guard: no items rung in the event window means the event
+    # didn't run this Saturday. Return early — no PDF, no email, no SMS, no
+    # uploads — so the promoter and owners don't get a spurious "$0 payout"
+    # notification. force_date bypasses this so historical no-op backfills
+    # can still be verified on demand.
+    if not force_date and sales.get("item_rows", 0) == 0:
+        logger.info("No sales in %s window %s..%s — skipping notifications",
+                    EVENT_NAME, start_dt.isoformat(), end_dt.isoformat())
+        return {
+            "status": "skipped",
+            "reason": "no_event_this_week",
+            "event_name": EVENT_NAME,
+            "event_date": event_date.isoformat(),
+            "window": {"start": start_dt.isoformat(), "end": end_dt.isoformat()},
+            "item_rows": 0,
+        }
+
     pdf = build_pdf(event_date, start_dt, end_dt, calc)
 
     dropbox_res = save_to_dropbox(pdf, event_date)
