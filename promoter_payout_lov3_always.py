@@ -13,10 +13,10 @@ event (Black Swan promoter). Differences:
     - Email: Maurice + Black Swan + Anno
     - SMS: Maurice + Eddie (Zelle-to-Black-Swan reminder)
 
-Rates locked per event owner direction:
-    Liquor COGS      = 9%    (half of standard 18%)
-    Food COGS        = 12.5% (half of standard 25%)
-    Mixed Bev Tax    = 3.35% (half of standard 6.7% TX gross receipts)
+Rates locked per event owner direction (updated 2026-09-06):
+    Liquor COGS      = 18%
+    Food COGS        = 25%
+    Mixed Bev Tax    = 6.75% (TX gross receipts)
     Promoter Payout  = 20%
 """
 from __future__ import annotations
@@ -36,9 +36,9 @@ from google.cloud import bigquery, secretmanager
 logger = logging.getLogger(__name__)
 
 # ── Rates ──────────────────────────────────────────────────────────────
-LIQUOR_COGS_PCT = 0.09
-FOOD_COGS_PCT = 0.125
-MIXED_BEV_TAX_PCT = 0.0335
+LIQUOR_COGS_PCT = 0.18
+FOOD_COGS_PCT = 0.25
+MIXED_BEV_TAX_PCT = 0.0675
 PROMOTER_PCT = 0.20
 
 # ── Event ─────────────────────────────────────────────────────────────
@@ -269,22 +269,21 @@ def build_pdf(event_date: date, start_dt: datetime, end_dt: datetime,
     ]))
     story.append(sales_tbl)
 
-    story.append(Paragraph("Rate Adjustments for This Event", h2))
+    story.append(Paragraph("Applied Rates", h2))
     story.append(Paragraph(
-        "COGS and Mixed Beverage Tax applied at <b>HALF</b> of standard rates "
-        "per event owner direction. Standard rates in parentheses for reference.",
+        "COGS, Mixed Beverage Tax, and Promoter share applied at the standard "
+        "LOV3 Always event rates.",
         body))
     rate_tbl = Table([
-        ["Rate", "This Event", "Standard"],
-        ["Liquor COGS", _pct(LIQUOR_COGS_PCT), "18.00%"],
-        ["Food COGS", _pct(FOOD_COGS_PCT), "25.00%"],
-        ["Mixed Beverage Tax", _pct(MIXED_BEV_TAX_PCT), "6.70%"],
-        ["Promoter Payout %", _pct(PROMOTER_PCT), "15.00% (default)"],
-    ], colWidths=[3.0 * inch, 1.6 * inch, 1.5 * inch])
+        ["Rate", "Applied"],
+        ["Liquor COGS", _pct(LIQUOR_COGS_PCT)],
+        ["Food COGS", _pct(FOOD_COGS_PCT)],
+        ["Mixed Beverage Tax", _pct(MIXED_BEV_TAX_PCT)],
+        ["Promoter Payout %", _pct(PROMOTER_PCT)],
+    ], colWidths=[3.0 * inch, 1.6 * inch])
     rate_tbl.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("TEXTCOLOR", (2, 1), (2, -1), C["GREY"]),
         ("BACKGROUND", (0, 0), (-1, 0), C["IVORY"]),
         ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
