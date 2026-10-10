@@ -224,12 +224,15 @@ ORDER BY total_net_price DESC
 
     # Step 2 — monthly MB vs NON_MB revenue (business-day basis, net_price sum).
     # Also breaks out individual categories to match the per-category comments below.
+    # NULL-bucketing fix: NON_MB uses an OR IS NULL guard so NULL-category rows
+    # land in NON_MB instead of being silently dropped by NOT IN (NULL NOT IN → NULL).
     "monthly_revenue_2025": """
 SELECT
     FORMAT_DATE('%Y-%m', processing_date) AS month,
     ROUND(SUM(CASE WHEN sales_category IN ('Liquor', 'Wine', 'Bottled Beer')
                    THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS MB_rev,
     ROUND(SUM(CASE WHEN sales_category NOT IN ('Liquor', 'Wine', 'Bottled Beer')
+                        OR sales_category IS NULL
                    THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS NON_MB_rev,
     ROUND(SUM(CASE WHEN sales_category = 'Liquor'       THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS liquor_rev,
     ROUND(SUM(CASE WHEN sales_category = 'Wine'         THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS wine_rev,
@@ -238,10 +241,30 @@ SELECT
     ROUND(SUM(CASE WHEN sales_category = 'NA Beverage'  THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS na_bev_rev,
     ROUND(SUM(CASE WHEN sales_category = 'Hookah'       THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS hookah_rev,
     ROUND(SUM(CASE WHEN sales_category IN ('(none)', 'Door')
+                        OR sales_category IS NULL
                    THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS other_rev
 FROM `toast-analytics-444116.toast_raw.ItemSelectionDetails_raw`
 WHERE processing_date BETWEEN '2025-01-01' AND '2025-12-31'
     AND (voided IS NULL OR voided = 'false')
+GROUP BY month
+ORDER BY month
+""",
+
+    # Step 6 — monthly voided MB / NON_MB for 2025.
+    # Retained as a revenue-variance driver: new_grand + voided_annual == old_gross.
+    # Same NULL-bucketing guard as monthly_revenue_2025.
+    "voided_items_2025": """
+SELECT
+    FORMAT_DATE('%Y-%m', processing_date) AS month,
+    ROUND(SUM(CASE WHEN sales_category IN ('Liquor', 'Wine', 'Bottled Beer')
+                   THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS voided_MB,
+    ROUND(SUM(CASE WHEN sales_category NOT IN ('Liquor', 'Wine', 'Bottled Beer')
+                        OR sales_category IS NULL
+                   THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS voided_NON_MB,
+    ROUND(SUM(CAST(net_price AS FLOAT64)), 2) AS voided_total
+FROM `toast-analytics-444116.toast_raw.ItemSelectionDetails_raw`
+WHERE processing_date BETWEEN '2025-01-01' AND '2025-12-31'
+    AND voided = 'true'
 GROUP BY month
 ORDER BY month
 """,
@@ -294,48 +317,78 @@ ORDER BY total_amount
 }
 
 # ---------------------------------------------------------------
-# BigQuery snapshots — pulled 2026-10-10. Rerun the SQL in
-# BQ_QUERIES above to refresh these snapshots.
+# BigQuery snapshots — re-pulled 2026-10-10 (corrected run).
+# Rerun the SQL in BQ_QUERIES above to refresh these snapshots.
+#
+# IMPORTANT — SNAPSHOTS ARE NET OF VOIDS
+# All revenue figures below exclude voided items (voided = 'true').
+# This is consistent with sba_financial_statements.py (lines 164/188/226/501)
+# and the accepted SBA P&L basis filed with the lender.
+#
+# Prior snapshot (before this correction) erroneously INCLUDED $176,422.30 of
+# voided 2025 items, inflating MB by $159,144.23 and NON_MB by $17,278.07.
+# Voided totals are now separately tracked in BQ_RESULTS["voided_items_2025"]
+# as a revenue-variance driver.  Cross-check: new_grand + voided_annual =
+# 4,250,961.87 + 176,422.30 = 4,427,384.17 (old gross, exact match).
 # ---------------------------------------------------------------
 BQ_RESULTS = {
     # Step 1 — sales category classification
     # MB bucket = alcohol (Texas Mixed Beverage tax applies)
-    # NON_MB = food, NA beverage, hookah, door, uncategorized
+    # NON_MB = food, NA beverage, hookah, door, uncategorized / NULL category
     # No ambiguous categories — each was clearly identifiable.
-    # Revenue figures below are 2025 full-year (business-day basis, net_price sum).
+    # Revenue figures below are 2025 full-year, NET OF VOIDS (business-day basis, net_price sum).
     "sales_category_classification": {
         "mb":      ["Liquor", "Wine", "Bottled Beer"],
-        "non_mb":  ["Food", "NA Beverage", "Hookah", "(none)", "Door"],
+        "non_mb":  ["Food", "NA Beverage", "Hookah", "(none)", "Door", "NULL"],
         "ambiguous": [],
     },
-    # Per-category full-year 2025 revenue (net_price, business-day basis):
-    #   Liquor       3,445,320.28
-    #   Food           683,866.09
-    #   NA Beverage    139,134.03
-    #   Hookah         106,434.61  (in-house POS only; Predictive Insights deposits are in BankTransactions_raw)
-    #   Wine            28,587.30
-    #   Bottled Beer    21,913.15
-    #   (none)           1,368.71
-    #   Door               760.00
-    # MB total: 3,495,820.73  |  NON_MB total: 931,563.44
+    # Per-category full-year 2025 revenue (net_price, business-day basis, NET OF VOIDS):
+    #   Liquor       3,286,827.30  (prior snapshot erroneously showed 3,445,320.28 — includes voids)
+    #   Food           672,441.54  (prior: 683,866.09)
+    #   NA Beverage    137,162.03  (prior: 139,134.03)
+    #   Hookah         102,673.09  (in-house POS only; Predictive Insights deposits are in BankTransactions_raw; prior: 106,434.61)
+    #   Wine            28,167.30  (prior: 28,587.30)
+    #   Bottled Beer    21,681.90  (prior: 21,913.15)
+    #   (none)/NULL      1,368.71  (unchanged — no voided rows in NULL category)
+    #   Door               640.00  (prior: 760.00)
+    # MB total: 3,336,676.50  |  NON_MB total: 914,285.37  |  Grand: 4,250,961.87
 
-    # Step 2 — monthly revenue by bucket (business-day basis, 2025-01 through 2025-12)
+    # Step 2 — monthly revenue by bucket (business-day basis, 2025-01 through 2025-12, NET OF VOIDS)
     "monthly_revenue_2025": {
-        "2025-01": {"MB": 296891.16, "NON_MB":  95718.36},
-        "2025-02": {"MB": 263500.50, "NON_MB": 104745.85},
-        "2025-03": {"MB": 362726.17, "NON_MB": 127200.92},
-        "2025-04": {"MB": 283617.28, "NON_MB":  66627.05},
-        "2025-05": {"MB": 337272.30, "NON_MB":  67265.58},
-        "2025-06": {"MB": 239553.37, "NON_MB":  63618.61},
-        "2025-07": {"MB": 264968.74, "NON_MB":  66891.12},
-        "2025-08": {"MB": 341595.89, "NON_MB":  68101.43},
-        "2025-09": {"MB": 261777.48, "NON_MB":  60516.70},
-        "2025-10": {"MB": 292317.64, "NON_MB":  73222.69},
-        "2025-11": {"MB": 274208.65, "NON_MB":  76454.94},
-        "2025-12": {"MB": 277391.55, "NON_MB":  61200.19},
+        "2025-01": {"MB": 282350.20, "NON_MB":  93219.66},
+        "2025-02": {"MB": 251502.09, "NON_MB": 100471.71},
+        "2025-03": {"MB": 347544.06, "NON_MB": 124950.24},
+        "2025-04": {"MB": 272526.60, "NON_MB":  65968.80},
+        "2025-05": {"MB": 318686.60, "NON_MB":  66570.58},
+        "2025-06": {"MB": 229306.47, "NON_MB":  62974.61},
+        "2025-07": {"MB": 255180.27, "NON_MB":  66025.17},
+        "2025-08": {"MB": 330018.62, "NON_MB":  66940.68},
+        "2025-09": {"MB": 247467.78, "NON_MB":  60013.70},
+        "2025-10": {"MB": 279621.50, "NON_MB":  71634.09},
+        "2025-11": {"MB": 261649.13, "NON_MB":  75022.94},
+        "2025-12": {"MB": 260823.18, "NON_MB":  60493.19},
     },
-    # MB annual total: 3,495,820.73  |  NON_MB annual total: 931,563.44
-    # Grand total POS net_price: 4,427,384.17  (plausible for LOV3 at $150-500K/mo)
+    # MB annual total: 3,336,676.50  |  NON_MB annual total: 914,285.37
+    # Grand total POS net_price (net of voids): 4,250,961.87
+    # Gross POS net_price (including voids):    4,427,384.17  (= new grand + voided_items_2025 annual)
+
+    # Step 6 — voided items 2025 by month (revenue-variance driver; retained for audit trail)
+    # Cross-check: voided_annual_total 176,422.30 + new grand 4,250,961.87 = 4,427,384.17 (exact)
+    "voided_items_2025": {
+        "2025-01": {"voided_MB":  14540.96, "voided_NON_MB":  2498.70, "voided_total":  17039.66},
+        "2025-02": {"voided_MB":  11998.41, "voided_NON_MB":  4274.14, "voided_total":  16272.55},
+        "2025-03": {"voided_MB":  15182.11, "voided_NON_MB":  2250.68, "voided_total":  17432.79},
+        "2025-04": {"voided_MB":  11090.68, "voided_NON_MB":   658.25, "voided_total":  11748.93},
+        "2025-05": {"voided_MB":  18585.70, "voided_NON_MB":   695.00, "voided_total":  19280.70},
+        "2025-06": {"voided_MB":  10246.90, "voided_NON_MB":   644.00, "voided_total":  10890.90},
+        "2025-07": {"voided_MB":   9788.47, "voided_NON_MB":   865.95, "voided_total":  10654.42},
+        "2025-08": {"voided_MB":  11577.27, "voided_NON_MB":  1160.75, "voided_total":  12738.02},
+        "2025-09": {"voided_MB":  14309.70, "voided_NON_MB":   503.00, "voided_total":  14812.70},
+        "2025-10": {"voided_MB":  12696.14, "voided_NON_MB":  1588.60, "voided_total":  14284.74},
+        "2025-11": {"voided_MB":  12559.52, "voided_NON_MB":  1432.00, "voided_total":  13991.52},
+        "2025-12": {"voided_MB":  16568.37, "voided_NON_MB":   707.00, "voided_total":  17275.37},
+    },
+    # Voided annual: MB 159,144.23 | NON_MB 17,278.07 | Total 176,422.30
 
     # Step 3 — cash at 12/31/2025
     # Source: BankTransactions_raw stmt-14.csv (BofA CSV upload, single checking account).
