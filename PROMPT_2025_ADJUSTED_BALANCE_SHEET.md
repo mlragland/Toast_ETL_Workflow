@@ -114,8 +114,8 @@ A $59,175 bank debit on 2025-08-25 (`Legal Order, LTS PXXXXX5000391`) was **full
 ### Taxes Payable at 12/31/2025
 $29,457.49 total (periods 2511 + 2512 across all three accounts; payments filed Jan/Feb 2026):
 - MB GR: 4165.52 + 701.02 + 3587.85 = 8454.39
-- MB Sales: ~10,099.15
-- S&U: ~10,903.95 (after 0.5% timely-filer discount on any qualifying periods)
+- MB Sales: 10,100.15
+- S&U: 10,902.95 (after 0.5% timely-filer discount on any qualifying periods)
 
 ---
 
