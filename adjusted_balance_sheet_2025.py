@@ -198,3 +198,103 @@ def penalties_and_interest(rows: list, year: int = 2025) -> dict:
 
 def implied_receipts(liabs: dict, rate: float) -> dict:
     return {p: round(v / rate, 2) for p, v in liabs.items()}
+
+
+# ---------------------------------------------------------------
+# BigQuery snapshots — pulled 2026-10-10. Rerun the queries in
+# PROMPT_2025_ADJUSTED_BALANCE_SHEET.md to refresh.
+# ---------------------------------------------------------------
+BQ_RESULTS = {
+    # Step 1 — sales category classification
+    # MB bucket = alcohol (Texas Mixed Beverage tax applies)
+    # NON_MB = food, NA beverage, hookah, door, uncategorized
+    # No ambiguous categories — each was clearly identifiable.
+    # Revenue figures below are 2025 full-year (business-day basis, net_price sum).
+    "sales_category_classification": {
+        "mb":      ["Liquor", "Wine", "Bottled Beer"],
+        "non_mb":  ["Food", "NA Beverage", "Hookah", "(none)", "Door"],
+        "ambiguous": [],
+    },
+    # Per-category full-year 2025 revenue (net_price, business-day basis):
+    #   Liquor       3,445,320.28
+    #   Food           683,866.09
+    #   NA Beverage    139,134.03
+    #   Hookah         106,434.61  (in-house POS only; Predictive Insights deposits are in BankTransactions_raw)
+    #   Wine            28,587.30
+    #   Bottled Beer    21,913.15
+    #   (none)           1,368.71
+    #   Door               760.00
+    # MB total: 3,495,820.73  |  NON_MB total: 931,563.43
+
+    # Step 2 — monthly revenue by bucket (business-day basis, 2025-01 through 2025-12)
+    "monthly_revenue_2025": {
+        "2025-01": {"MB": 296891.16, "NON_MB":  95718.36},
+        "2025-02": {"MB": 263500.50, "NON_MB": 104745.85},
+        "2025-03": {"MB": 362726.17, "NON_MB": 127200.92},
+        "2025-04": {"MB": 283617.28, "NON_MB":  66627.05},
+        "2025-05": {"MB": 337272.30, "NON_MB":  67265.58},
+        "2025-06": {"MB": 239553.37, "NON_MB":  63618.61},
+        "2025-07": {"MB": 264968.74, "NON_MB":  66891.12},
+        "2025-08": {"MB": 341595.89, "NON_MB":  68101.43},
+        "2025-09": {"MB": 261777.48, "NON_MB":  60516.70},
+        "2025-10": {"MB": 292317.64, "NON_MB":  73222.69},
+        "2025-11": {"MB": 274208.65, "NON_MB":  76454.94},
+        "2025-12": {"MB": 277391.55, "NON_MB":  61200.19},
+    },
+    # MB annual total: 3,495,820.73  |  NON_MB annual total: 931,563.44
+    # Grand total POS net_price: 4,427,384.17  (plausible for LOV3 at $150-500K/mo)
+
+    # Step 3 — cash at 12/31/2025
+    # Source: BankTransactions_raw stmt-14.csv (BofA CSV upload, single checking account).
+    # running_balance column exists and is per-transaction in statement order.
+    # Last (lowest) running_balance on 2025-12-31 = -$473.97 due to two $10 overdraft fees
+    # posting after a $71,212.57 payroll wire left the account at $873.51.
+    # The account balance just before OD fees was ~$873.51.
+    # This is UNRELIABLE as a balance-sheet cash figure: it reflects an intraday low after a
+    # large payroll wire on 12/31; does not include any savings or secondary accounts.
+    # Plaid live sync began 2026-07-30 so it cannot backfill the 12/31/2025 closing balance.
+    # ACCOUNTANT INPUT required — use BofA Dec 2025 statement closing balance instead.
+    "cash_balance_20251231": None,
+    "cash_balance_note": (
+        "BQ stmt-14.csv shows -$473.97 at end of 12/31 due to $10 OD fees after $71K payroll wire. "
+        "Intraday balance pre-wire was ~$74,082.61; post-wire before OD fees was ~$873.51. "
+        "Use Dec-2025 BofA statement closing balance for the balance sheet. ACCOUNTANT INPUT."
+    ),
+
+    # Step 4 — legal order rows (ALL matches for LEGAL ORDER or LTS in description)
+    # The $59,175 debit was REVERSED on 2025-08-29 — net impact to the account is $0.
+    "legal_order_rows": [
+        ("2025-08-25", "Legal Order, LTS PXXXXX5000391",        -59175.00),
+        ("2025-08-29", "Legal Order Reversal, LTS PXXXXX5000391", 59175.00),
+    ],
+    "legal_order_note": (
+        "Debit of $59,175 on 2025-08-25 was fully reversed on 2025-08-29 (net = $0). "
+        "No other legal-order or LTS rows found in BankTransactions_raw. "
+        "Confirm with BofA statements that reversal cleared; do not show as a 2025 expense."
+    ),
+
+    # Step 5 — 2025 owner distributions from BankTransactions_raw categories
+    # Category column is present; query grouped by category for transaction_date 2025-01-01 to 2025-12-31.
+    # Owner-related categories:
+    #   Owner Draws / Transfers:          -172,406.51  (108 transactions)
+    #   Owner Discretionary Expenses:      -43,676.41  ( 77 transactions)
+    #   Owner Travel:                       -9,413.45  ( 30 transactions)
+    # Combined owner-attributable:        -225,496.37
+    # Prior P&L showed $231,907 Owner Draws — difference of ~$6,411 likely in
+    # uncategorized rows (3 rows, -$1,740.77) and possible mis-bucket in Credit Card
+    # Payments (-$48,759.49, 20 rows) or Internal Account Transfer (+$156,731.51).
+    "owner_distributions_2025": {
+        "Owner Draws / Transfers":       -172406.51,
+        "Owner Discretionary Expenses":   -43676.41,
+        "Owner Travel":                    -9413.45,
+        "combined_owner_attributable":   -225496.37,
+    },
+    "owner_distributions_note": (
+        "BQ bank category total for owner-attributable spend = $225,496.37. "
+        "Prior P&L showed $231,907 — delta of ~$6,411. "
+        "Possible gap: uncategorized rows ($1,740.77) and potential owner transactions "
+        "miscategorized as Credit Card Payments ($48,759.49) or Admin & Office ($23,416.95). "
+        "ACCOUNTANT INPUT: reconcile to K-1 distribution amount before filing."
+    ),
+}
+
