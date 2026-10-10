@@ -24,8 +24,12 @@ MB_GR_RATE    = 0.067    # LOV3-paid on the same MB receipts base
 SU_RATE       = 0.0825   # Houston combined state+local rate on non-MB taxable sales
 
 # Texas Comptroller timely-filing discount: 0.5% of the tax due when paid on time.
-# See Texas Tax Code § 151.423 and Comptroller Rule 3.286.
+# Applies ONLY to Sales & Use Tax (Tax Code § 151.423 / Comptroller Rule 3.286).
+# Mixed Beverage taxes (Tax Code § 183) are NOT eligible for this discount.
 TIMELY_FILER_DISCOUNT_RATE = 0.005
+# Maximum absolute difference between a period's remaining shortfall and the
+# expected 0.5% discount amount before we stop treating it as a timely-filer discount.
+TIMELY_FILER_TOLERANCE = 0.02
 
 # ---------------------------------------------------------------------------
 # MB Gross Receipts Tax (6.7% — LOV3 expense)
@@ -180,7 +184,11 @@ def period_payments(rows: list, year: int = 2025) -> dict:
     return {p: round(v, 2) for p, v in out.items()}
 
 
-def taxes_payable_at_yearend(rows: list, asof: str = "2025-12-31") -> float:
+def taxes_payable_at_yearend(
+    rows: list,
+    asof: str = "2025-12-31",
+    discount_eligible: bool = False,
+) -> float:
     """Return the net unpaid tax liability for all periods whose period_end <= asof,
     after crediting payments made on or before asof.
 
@@ -194,66 +202,55 @@ def taxes_payable_at_yearend(rows: list, asof: str = "2025-12-31") -> float:
     to a single calendar year), so the function is correct for mid-year asof dates.
     Payments with filed_date <= asof are credited regardless of which year's
     period they belong to.
+
+    Timely-filer discount settlement (discount_eligible=True only):
+        Texas Tax Code § 151.423 grants a 0.5% discount on Sales & Use Tax when
+        the return and payment are filed on time.  Mixed Beverage taxes (§ 183)
+        are NOT eligible.  When ``discount_eligible=True``, any period where
+        (a) at least one payment was made by asof, (b) a positive shortfall
+        remains, and (c) that shortfall is within ``TIMELY_FILER_TOLERANCE`` of
+        0.5% of the period liability is treated as fully settled — the shortfall
+        is the earned discount, not an unpaid balance.  Pass
+        ``discount_eligible=False`` (the default) for MB_GR and MB_SALES rows.
     """
-    # Collect liabilities for every period whose period_end falls on or before asof.
-    liabs: defaultdict = defaultdict(float)
-    for txn, filed, ref, period, pend, amount, struck in rows:
-        if txn in ("return", "amended") and not struck and pend <= asof:
-            liabs[period] += amount
+    balances = _period_balances(rows, asof)
 
-    # Sum payments filed on or before asof, per period.
-    paid_by_asof: defaultdict = defaultdict(float)
-    for txn, filed, ref, period, pend, amount, struck in rows:
-        if txn == "payment" and not struck and filed <= asof:
-            paid_by_asof[period] += amount
-
-    # Remaining balance per period, floored at 0.
-    # Special case: if a period has been paid and the remaining shortfall is within
-    # $0.02 of the Texas Comptroller 0.5% timely-filing discount, treat the period as
-    # fully settled — the discount is an earned reduction, not an unpaid liability.
-    # Arbitrary shortfalls (i.e., shortfall does NOT match 0.5% ± $0.02) are kept
-    # as payables unchanged.
     total = 0.0
-    for p, v in liabs.items():
-        paid = paid_by_asof[p]
-        remaining = v - paid
-        if paid > 0 and remaining > 0:
-            expected_discount = round(v * TIMELY_FILER_DISCOUNT_RATE, 2)
-            if abs(remaining - expected_discount) <= 0.02:
+    for p, (liability, paid) in balances.items():
+        remaining = liability - paid
+        if discount_eligible and paid > 0 and remaining > 0:
+            if _is_timely_discount(liability, remaining):
                 # Settled via timely-filer discount — remainder is $0
                 continue
         total += max(0.0, remaining)
     return round(total, 2)
 
 
-def timely_filer_discounts(rows: list, asof: str = "2025-12-31") -> dict:
+def timely_filer_discounts(
+    rows: list,
+    asof: str = "2025-12-31",
+    discount_eligible: bool = False,
+) -> dict:
     """Return a mapping of {period: discount_amount} for every period whose shortfall
     was recognised as a Texas Comptroller timely-filing discount (0.5% of liability).
 
     Only periods with at least one payment on or before asof, a positive remaining
-    shortfall, and a shortfall within $0.02 of 0.5% × liability qualify.  Used by
-    build_balance_sheet() to surface discount amounts in the audit flags.
+    shortfall, and a shortfall within ``TIMELY_FILER_TOLERANCE`` of 0.5% × liability
+    qualify.  Pass ``discount_eligible=True`` only for Sales & Use Tax rows (Tax Code
+    § 151.423); Mixed Beverage taxes (§ 183) are NOT eligible — pass False (default)
+    for MB_GR and MB_SALES rows.  Used by build_balance_sheet() to surface discount
+    amounts in the audit flags.
     """
-    # Collect liabilities for periods whose period_end falls on or before asof.
-    liabs: defaultdict = defaultdict(float)
-    for txn, filed, ref, period, pend, amount, struck in rows:
-        if txn in ("return", "amended") and not struck and pend <= asof:
-            liabs[period] += amount
+    if not discount_eligible:
+        return {}
 
-    # Sum payments filed on or before asof, per period.
-    paid_by_asof: defaultdict = defaultdict(float)
-    for txn, filed, ref, period, pend, amount, struck in rows:
-        if txn == "payment" and not struck and filed <= asof:
-            paid_by_asof[period] += amount
+    balances = _period_balances(rows, asof)
 
     discounts: dict = {}
-    for p, v in liabs.items():
-        paid = paid_by_asof[p]
-        remaining = v - paid
-        if paid > 0 and remaining > 0:
-            expected_discount = round(v * TIMELY_FILER_DISCOUNT_RATE, 2)
-            if abs(remaining - expected_discount) <= 0.02:
-                discounts[p] = round(remaining, 2)
+    for p, (liability, paid) in balances.items():
+        remaining = liability - paid
+        if paid > 0 and remaining > 0 and _is_timely_discount(liability, remaining):
+            discounts[p] = round(remaining, 2)
     return discounts
 
 
@@ -270,6 +267,37 @@ def penalties_and_interest(rows: list, year: int = 2025) -> dict:
 
 def implied_receipts(liabs: dict, rate: float) -> dict:
     return {p: round(v / rate, 2) for p, v in liabs.items()}
+
+
+# ---------------------------------------------------------------------------
+# Shared private helpers (used by taxes_payable_at_yearend and
+# timely_filer_discounts to avoid copy-pasting the grouping logic)
+# ---------------------------------------------------------------------------
+
+def _period_balances(rows: list, asof: str) -> dict:
+    """Return ``{period: (liability, paid_by_asof)}`` for every period whose
+    ``period_end <= asof``.  Struck rows are always excluded.
+
+    *liability* — sum of non-struck return/amended rows for that period.
+    *paid_by_asof* — sum of non-struck payment rows whose ``filed_date <= asof``.
+    """
+    liabs: defaultdict = defaultdict(float)
+    paid: defaultdict = defaultdict(float)
+    for txn, filed, ref, period, pend, amount, struck in rows:
+        if struck:
+            continue
+        if txn in ("return", "amended") and pend <= asof:
+            liabs[period] += amount
+        elif txn == "payment" and filed <= asof:
+            paid[period] += amount
+    return {p: (round(v, 2), round(paid[p], 2)) for p, v in liabs.items()}
+
+
+def _is_timely_discount(liability: float, shortfall: float) -> bool:
+    """Return True when *shortfall* is within ``TIMELY_FILER_TOLERANCE`` of the
+    Texas Comptroller 0.5% timely-filing discount on *liability*."""
+    expected = round(liability * TIMELY_FILER_DISCOUNT_RATE, 2)
+    return abs(shortfall - expected) <= TIMELY_FILER_TOLERANCE
 
 
 def match_legal_order(
@@ -681,7 +709,7 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
     flags.append(
         "ACCOUNTANT INPUT — cash: BQ shows -$473.97 (intraday low after $71K "
         "payroll wire on 12/31/2025); use Dec-2025 BofA statement closing balance. "
-        f"Placeholder: $0."
+        "Placeholder: $0."
     )
 
     # Accounts Receivable — carrying 2024 Schedule L ending balance forward.
@@ -751,14 +779,18 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
     # Texas Comptroller tax accounts (MB GR, MB Sales, Sales & Use).
     # Periods 2511 and 2512 had payments filed in Jan/Feb 2026 (after 12/31/2025),
     # so those balances remain outstanding at year-end.
+    # NOTE: timely-filer discount (§ 151.423) applies ONLY to Sales & Use Tax;
+    # MB taxes (§ 183) are ineligible — discount_eligible=False for MB_GR and MB_SALES.
     taxes_payable = round(
-        sum(taxes_payable_at_yearend(r, asof=asof) for r in (MB_GR, MB_SALES, SALES_USE)),
+        taxes_payable_at_yearend(MB_GR,    asof=asof, discount_eligible=False)
+        + taxes_payable_at_yearend(MB_SALES,  asof=asof, discount_eligible=False)
+        + taxes_payable_at_yearend(SALES_USE, asof=asof, discount_eligible=True),
         2,
     )
 
     # Timely-filer discount audit flag: surface any periods treated as settled via
     # the Texas Comptroller 0.5% timely-filing discount (not counted in taxes_payable).
-    _su_discounts = timely_filer_discounts(SALES_USE, asof=asof)
+    _su_discounts = timely_filer_discounts(SALES_USE, asof=asof, discount_eligible=True)
     if _su_discounts:
         for _period, _disc_amt in _su_discounts.items():
             flags.append(
@@ -816,12 +848,12 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
     # accountant must reconcile to K-1 distribution amount before filing.
     distributions_2025 = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
     flags.append(
-        f"NOTE — distributions_2025: BQ bank-category total = $225,496.37. "
+        f"NOTE — distributions_2025: BQ bank-category total = ${distributions_2025:,.2f}. "
         "Prior SBA P&L showed $231,907 Owner Draws (delta ~$6,411). "
         "Possible gap: uncategorized rows ($1,740.77) or transactions miscategorized "
         "as Credit Card Payments / Admin & Office. "
-        "ACCOUNTANT INPUT: reconcile to K-1 distribution amount before filing. "
-        "Using BQ figure ($225,496.37) as the working value."
+        f"Using BQ figure (${distributions_2025:,.2f}) as the working value; "
+        "reconcile to K-1 distribution amount before filing."
     )
 
     # 2025 net income — placeholder 0; reference the adjusted P&L / SBA package.

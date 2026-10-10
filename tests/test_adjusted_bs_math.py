@@ -2,7 +2,8 @@
 from adjusted_balance_sheet_2025 import (
     period_liabilities, taxes_payable_at_yearend, penalties_and_interest,
     implied_receipts, match_legal_order, MB_GR, MB_SALES, SALES_USE, BQ_RESULTS,
-    build_balance_sheet, timely_filer_discounts,
+    build_balance_sheet, timely_filer_discounts, _period_balances, _is_timely_discount,
+    TIMELY_FILER_DISCOUNT_RATE, TIMELY_FILER_TOLERANCE,
 )
 
 
@@ -131,15 +132,20 @@ def test_taxes_payable_overpayment_floored_at_zero():
 def test_balance_sheet_ties():
     """Balance sheet must balance: total_assets == total_liabilities + total_equity."""
     bs = build_balance_sheet()
-    assert abs(bs["total_assets"] - (bs["total_liabilities"] + bs["total_equity"])) < 1.0
+    assert abs(bs["total_assets"] - (bs["total_liabilities"] + bs["total_equity"])) <= 0.01
 
 
 def test_taxes_payable_line_is_sum_of_three_accounts():
     """taxes_payable in liabilities must equal the sum of taxes_payable_at_yearend
-    across all three tax type rows."""
+    across all three tax type rows, with discount_eligible=True only for SALES_USE."""
     bs = build_balance_sheet()
-    expected = sum(taxes_payable_at_yearend(r) for r in (MB_GR, MB_SALES, SALES_USE))
-    assert bs["liabilities"]["taxes_payable"] == round(expected, 2)
+    expected = round(
+        taxes_payable_at_yearend(MB_GR,    discount_eligible=False)
+        + taxes_payable_at_yearend(MB_SALES,  discount_eligible=False)
+        + taxes_payable_at_yearend(SALES_USE, discount_eligible=True),
+        2,
+    )
+    assert bs["liabilities"]["taxes_payable"] == expected
 
 
 def test_balance_sheet_has_required_keys():
@@ -170,12 +176,13 @@ def test_balance_sheet_unreconciled_difference_surfaced():
 
 def test_timely_filer_discount_exact_half_percent_treated_as_settled():
     """A period with liability 1000.00 and payment 995.00 (exactly 0.5% short)
-    must contribute 0 to taxes_payable — the shortfall is the earned discount."""
+    must contribute 0 to taxes_payable when discount_eligible=True — the shortfall
+    is the earned discount."""
     rows = [
         ("return",  "2025-11-01", "R001", "2510", "2025-10-31", 1000.00, False),
         ("payment", "2025-11-15", "P001", "2510", "2025-10-31",  995.00, False),
     ]
-    result = taxes_payable_at_yearend(rows, asof="2025-12-31")
+    result = taxes_payable_at_yearend(rows, asof="2025-12-31", discount_eligible=True)
     assert result == 0.0
 
 
@@ -193,9 +200,12 @@ def test_timely_filer_discount_one_percent_short_remains_payable():
 def test_total_taxes_payable_equals_29457_49():
     """After recognising the S&U 2510 timely-filer discount, total taxes payable
     across all three accounts must equal $29,457.49
-    (MB_GR 8,454.39 + MB_SALES 10,100.15 + S&U 10,902.95)."""
+    (MB_GR 8,454.39 + MB_SALES 10,100.15 + S&U 10,902.95).
+    discount_eligible=True only for SALES_USE (§ 151.423); MB taxes (§ 183) ineligible."""
     total = round(
-        sum(taxes_payable_at_yearend(r) for r in (MB_GR, MB_SALES, SALES_USE)),
+        taxes_payable_at_yearend(MB_GR,    discount_eligible=False)
+        + taxes_payable_at_yearend(MB_SALES,  discount_eligible=False)
+        + taxes_payable_at_yearend(SALES_USE, discount_eligible=True),
         2,
     )
     assert total == 29457.49
@@ -204,5 +214,31 @@ def test_total_taxes_payable_equals_29457_49():
 def test_timely_filer_discounts_sales_use_returns_2510():
     """timely_filer_discounts(SALES_USE) must identify period 2510 as the only
     settled-via-discount period, with a discount amount of $29.50."""
-    result = timely_filer_discounts(SALES_USE)
+    result = timely_filer_discounts(SALES_USE, discount_eligible=True)
     assert result == {"2510": 29.50}
+
+
+# ---------------------------------------------------------------------------
+# New guard tests (discount_eligible gating)
+# ---------------------------------------------------------------------------
+
+def test_timely_filer_discount_zero_payments_remains_payable():
+    """A period with an exact 0.5% shortfall but ZERO payments by asof must NOT
+    be treated as a discount settlement — there are no payments to earn the discount."""
+    rows = [
+        ("return",  "2025-11-01", "R001", "2510", "2025-10-31", 1000.00, False),
+        # No payment row at all.
+    ]
+    result = taxes_payable_at_yearend(rows, asof="2025-12-31", discount_eligible=True)
+    assert result == 1000.00
+
+
+def test_taxes_payable_ineligible_exact_half_percent_not_settled():
+    """When discount_eligible=False, an exact 0.5%-short period must NOT be settled
+    — the shortfall remains a payable regardless of how close it is to the discount."""
+    rows = [
+        ("return",  "2025-11-01", "R001", "2510", "2025-10-31", 1000.00, False),
+        ("payment", "2025-11-15", "P001", "2510", "2025-10-31",  995.00, False),  # exactly 0.5% short
+    ]
+    result = taxes_payable_at_yearend(rows, asof="2025-12-31", discount_eligible=False)
+    assert result == 5.00  # shortfall kept as payable; not settled
