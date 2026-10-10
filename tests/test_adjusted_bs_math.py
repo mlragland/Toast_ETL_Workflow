@@ -2,7 +2,7 @@
 from adjusted_balance_sheet_2025 import (
     period_liabilities, taxes_payable_at_yearend, penalties_and_interest,
     implied_receipts, match_legal_order, MB_GR, MB_SALES, SALES_USE, BQ_RESULTS,
-    build_balance_sheet,
+    build_balance_sheet, timely_filer_discounts,
 )
 
 
@@ -162,3 +162,47 @@ def test_balance_sheet_unreconciled_difference_surfaced():
     """unreconciled_difference must be a float (even if 0.0) — never hidden."""
     bs = build_balance_sheet()
     assert isinstance(bs["unreconciled_difference"], float)
+
+
+# ---------------------------------------------------------------------------
+# Timely-filer discount tests (Finding 1)
+# ---------------------------------------------------------------------------
+
+def test_timely_filer_discount_exact_half_percent_treated_as_settled():
+    """A period with liability 1000.00 and payment 995.00 (exactly 0.5% short)
+    must contribute 0 to taxes_payable — the shortfall is the earned discount."""
+    rows = [
+        ("return",  "2025-11-01", "R001", "2510", "2025-10-31", 1000.00, False),
+        ("payment", "2025-11-15", "P001", "2510", "2025-10-31",  995.00, False),
+    ]
+    result = taxes_payable_at_yearend(rows, asof="2025-12-31")
+    assert result == 0.0
+
+
+def test_timely_filer_discount_one_percent_short_remains_payable():
+    """A period with liability 1000.00 and payment 990.00 (1% short — not the
+    timely-filer discount) must remain as a $10.00 payable."""
+    rows = [
+        ("return",  "2025-11-01", "R001", "2510", "2025-10-31", 1000.00, False),
+        ("payment", "2025-11-15", "P001", "2510", "2025-10-31",  990.00, False),
+    ]
+    result = taxes_payable_at_yearend(rows, asof="2025-12-31")
+    assert result == 10.00
+
+
+def test_total_taxes_payable_equals_29457_49():
+    """After recognising the S&U 2510 timely-filer discount, total taxes payable
+    across all three accounts must equal $29,457.49
+    (MB_GR 8,454.39 + MB_SALES 10,100.15 + S&U 10,902.95)."""
+    total = round(
+        sum(taxes_payable_at_yearend(r) for r in (MB_GR, MB_SALES, SALES_USE)),
+        2,
+    )
+    assert total == 29457.49
+
+
+def test_timely_filer_discounts_sales_use_returns_2510():
+    """timely_filer_discounts(SALES_USE) must identify period 2510 as the only
+    settled-via-discount period, with a discount amount of $29.50."""
+    result = timely_filer_discounts(SALES_USE)
+    assert result == {"2510": 29.50}

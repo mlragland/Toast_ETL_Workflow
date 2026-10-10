@@ -23,6 +23,10 @@ MB_SALES_RATE = 0.0825   # collected on mixed-beverage sales
 MB_GR_RATE    = 0.067    # LOV3-paid on the same MB receipts base
 SU_RATE       = 0.0825   # Houston combined state+local rate on non-MB taxable sales
 
+# Texas Comptroller timely-filing discount: 0.5% of the tax due when paid on time.
+# See Texas Tax Code § 151.423 and Comptroller Rule 3.286.
+TIMELY_FILER_DISCOUNT_RATE = 0.005
+
 # ---------------------------------------------------------------------------
 # MB Gross Receipts Tax (6.7% — LOV3 expense)
 # Tuple format: (txn_type, filed_date, ref, period, period_end, amount, struck)
@@ -204,8 +208,53 @@ def taxes_payable_at_yearend(rows: list, asof: str = "2025-12-31") -> float:
             paid_by_asof[period] += amount
 
     # Remaining balance per period, floored at 0.
-    total = sum(max(0.0, v - paid_by_asof[p]) for p, v in liabs.items())
+    # Special case: if a period has been paid and the remaining shortfall is within
+    # $0.02 of the Texas Comptroller 0.5% timely-filing discount, treat the period as
+    # fully settled — the discount is an earned reduction, not an unpaid liability.
+    # Arbitrary shortfalls (i.e., shortfall does NOT match 0.5% ± $0.02) are kept
+    # as payables unchanged.
+    total = 0.0
+    for p, v in liabs.items():
+        paid = paid_by_asof[p]
+        remaining = v - paid
+        if paid > 0 and remaining > 0:
+            expected_discount = round(v * TIMELY_FILER_DISCOUNT_RATE, 2)
+            if abs(remaining - expected_discount) <= 0.02:
+                # Settled via timely-filer discount — remainder is $0
+                continue
+        total += max(0.0, remaining)
     return round(total, 2)
+
+
+def timely_filer_discounts(rows: list, asof: str = "2025-12-31") -> dict:
+    """Return a mapping of {period: discount_amount} for every period whose shortfall
+    was recognised as a Texas Comptroller timely-filing discount (0.5% of liability).
+
+    Only periods with at least one payment on or before asof, a positive remaining
+    shortfall, and a shortfall within $0.02 of 0.5% × liability qualify.  Used by
+    build_balance_sheet() to surface discount amounts in the audit flags.
+    """
+    # Collect liabilities for periods whose period_end falls on or before asof.
+    liabs: defaultdict = defaultdict(float)
+    for txn, filed, ref, period, pend, amount, struck in rows:
+        if txn in ("return", "amended") and not struck and pend <= asof:
+            liabs[period] += amount
+
+    # Sum payments filed on or before asof, per period.
+    paid_by_asof: defaultdict = defaultdict(float)
+    for txn, filed, ref, period, pend, amount, struck in rows:
+        if txn == "payment" and not struck and filed <= asof:
+            paid_by_asof[period] += amount
+
+    discounts: dict = {}
+    for p, v in liabs.items():
+        paid = paid_by_asof[p]
+        remaining = v - paid
+        if paid > 0 and remaining > 0:
+            expected_discount = round(v * TIMELY_FILER_DISCOUNT_RATE, 2)
+            if abs(remaining - expected_discount) <= 0.02:
+                discounts[p] = round(remaining, 2)
+    return discounts
 
 
 def penalties_and_interest(rows: list, year: int = 2025) -> dict:
@@ -706,6 +755,17 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         sum(taxes_payable_at_yearend(r, asof=asof) for r in (MB_GR, MB_SALES, SALES_USE)),
         2,
     )
+
+    # Timely-filer discount audit flag: surface any periods treated as settled via
+    # the Texas Comptroller 0.5% timely-filing discount (not counted in taxes_payable).
+    _su_discounts = timely_filer_discounts(SALES_USE, asof=asof)
+    if _su_discounts:
+        for _period, _disc_amt in _su_discounts.items():
+            flags.append(
+                f"NOTE — S&U period {_period} timely-filer discount (0.5%): "
+                f"${_disc_amt:.2f} shortfall treated as settled, not payable "
+                "(Texas Comptroller timely-filing discount per Tax Code § 151.423)."
+            )
 
     # Accounts Payable — no AP sub-ledger available; placeholder 0.
     accounts_payable = 0.0
