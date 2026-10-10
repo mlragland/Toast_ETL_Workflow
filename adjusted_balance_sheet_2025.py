@@ -1541,9 +1541,12 @@ def write_excel(bs: dict) -> str:
          "This tab distributes Q1/Q2 S&U evenly across 3 months for comparability. "
          "No adjustment — this is a presentation choice for this variance analysis only."),
         ("5. MB step change (Flag 1)",
-         "MB GR filings show a dramatic step change: Jan–Jun 2025 ~$1.9–4.1K/mo vs Jul+ ~$17–23K/mo. "
-         "This coincides with amended/struck returns for periods 2504–2505. "
-         "Accountant: confirm whether early-2025 under-filing is corrected or whether additional amendments are needed."),
+         "Jul–Aug 2025 filed MB base matches Toast POS to the dollar (variance <$6), validating the comparison method. "
+         "Jan–Jun and Sep–Dec filings imply only ~$28K–$80K/mo of taxable receipts vs Toast $230K–$350K/mo — "
+         "probable under-filing requiring amended returns, consistent with the struck/amended 2504–2505 returns "
+         "and a mid-2025 Comptroller correction that did not persist after August. "
+         "~$2.18M MB base and ~$442K non-MB base at issue for the year. "
+         "ACCOUNTANT REVIEW REQUIRED before any revenue adjustment is booked."),
         ("6. $59,175 legal order (RESOLVED)",
          "Debit 2025-08-25 reversed 2025-08-29, net = $0. "
          "RECOMMENDATION: if this was booked as OPEX in the 2025 P&L, reverse the entry. No balance sheet impact."),
@@ -1601,13 +1604,16 @@ def write_excel(bs: dict) -> str:
     # The six spec-required flags first, then the flags from build_balance_sheet()
     spec_flags = [
         ("SPEC FLAG 1",
-         "MB GR Step Change",
-         "Periods 2503–2506 (Jan–Jun 2025) filed $1,863–$3,588/mo MB GR. "
-         "Periods 2507+ (Jul–Dec 2025) filed $17,097–$22,111/mo. "
-         "Amended/struck returns for 2504 and 2505 coincide with the step change. "
-         "Pattern suggests a mid-2025 Comptroller correction or audit trigger. "
-         "Accountant: compare early-2025 MB GR implied receipts (÷0.067) to Toast MB POS data "
-         "to quantify whether Jan–Jun 2025 months were under-filed."),
+         "MB GR Step Change — Probable Under-Filing 10 of 12 Months",
+         "Jul–Aug 2025 (periods 2507–2508) filed MB base matches Toast POS to the dollar (variance <$6), "
+         "validating the comparison method. "
+         "Under-filed MB GR periods: 2501–2506 (liabilities $1,863–$4,616/mo) AND 2509–2512 (~$4.2–5.3K/mo); "
+         "only 2507–2508 (~$17–22K/mo) match Toast. "
+         "Amended/struck returns for 2504–2505 are consistent with a mid-2025 Comptroller correction "
+         "that did NOT persist after August. "
+         "~$2.18M MB base and ~$442K non-MB base probable under-filing across 10 of 12 months. "
+         "Refer to BAED and consider amended Comptroller returns. "
+         "ACCOUNTANT REVIEW REQUIRED before any revenue adjustment is booked."),
         ("SPEC FLAG 2",
          "$59,175 Classification — RESOLVED",
          "TX Comptroller legal hold debit of $59,175 on 2025-08-25 was FULLY REVERSED on 2025-08-29. "
@@ -1967,10 +1973,15 @@ def write_pdf(bs: dict) -> str:
          "S&U was filed quarterly for H1 2025 (Q1 = period 251, Q2 = period 252). "
          "Monthly variances in Jan–Jun reflect equal distribution of the quarterly filing across 3 months. "
          "The annual total is precise."),
-        ("MB step change",
-         "MB GR filings show ~$1.9–4.1K/mo Jan–Jun 2025 vs $17–23K/mo Jul–Dec 2025. "
-         "Amended/struck returns in periods 2504–2505 coincide with the step change. "
-         "Accountant must quantify whether early-2025 MB receipts were under-filed."),
+        ("MB step change — probable under-filing",
+         "Jul–Aug 2025 filed MB base matches Toast POS to the dollar (variance <$6), validating the comparison method. "
+         "Jan–Jun and Sep–Dec filings imply only ~$28K–$80K/mo vs Toast $230K–$350K/mo — "
+         "probable under-filing concentrated in 10 of 12 months. "
+         "Only Jul–Aug (periods 2507–2508) match Toast; the mid-2025 Comptroller correction "
+         "did not persist after August. "
+         "~$2.18M MB base at issue for the year. "
+         "Refer to BAED and consider amended Comptroller returns. "
+         "Flagged for review — not restated as fact pending accountant confirmation."),
         ("Service charges",
          "Mandatory 20% service charge is LOV3 revenue (IRS Rev. Rul. 2012-18, not gratuity). "
          "Included in net_price and likely included in Comptroller receipts. No adjustment needed."),
