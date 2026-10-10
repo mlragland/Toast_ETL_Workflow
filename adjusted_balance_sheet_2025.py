@@ -158,6 +158,21 @@ PARTNERS = {
     "Derwin James": None,
 }  # 2024 K-1 shows only Maurice's 15% capital; others flagged ACCOUNTANT INPUT
 
+# Shared narrative for the MB step-change finding — used in Tab 3 variance drivers,
+# Tab 4 SPEC FLAG 1, and the PDF Page 2 drivers section.  Keep per-site headings/short
+# labels local; only the body text lives here.
+MB_STEP_CHANGE_NARRATIVE = (
+    "Jul–Aug 2025 (periods 2507–2508) filed MB base matches Toast POS to the dollar "
+    "(variance <$6), validating the comparison method. "
+    "Under-filed MB GR periods: 2501–2506 (liabilities $1,863–$4,616/mo) AND "
+    "2509–2512 (~$4.2–5.3K/mo); only 2507–2508 (~$17–22K/mo) match Toast. "
+    "Amended/struck returns for 2504–2505 are consistent with a mid-2025 Comptroller "
+    "correction that did NOT persist after August. "
+    "~$2.18M MB base and ~$442K non-MB base probable under-filing across 10 of 12 months. "
+    "Refer to BAED and consider amended Comptroller returns. "
+    "ACCOUNTANT REVIEW REQUIRED before any revenue adjustment is booked."
+)
+
 # ---------------------------------------------------------------------------
 # Pure math functions
 # ---------------------------------------------------------------------------
@@ -1059,11 +1074,16 @@ def write_excel(bs: dict) -> str:
 
     Returns the output path.
     """
-    from openpyxl import Workbook
-    from openpyxl.styles import (
-        Alignment, Border, Font, PatternFill, Side,
-    )
-    from openpyxl.utils import get_column_letter
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import (
+            Alignment, Border, Font, PatternFill, Side,
+        )
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        import sys
+        print("openpyxl not installed. Run: pip install openpyxl", file=sys.stderr)
+        sys.exit(1)
 
     wb = Workbook()
 
@@ -1076,10 +1096,6 @@ def write_excel(bs: dict) -> str:
 
     def _fill(hex_color):
         return PatternFill("solid", fgColor=hex_color)
-
-    def _thin_border():
-        thin = Side(border_style="thin", color="CCCCCC")
-        return Border(bottom=thin)
 
     def _bottom_border():
         med = Side(border_style="medium", color="1A1A1A")
@@ -1227,7 +1243,7 @@ def write_excel(bs: dict) -> str:
     plug = equity["unreconciled_difference_plug"]
     plug_label = "Unreconciled Difference (plug — resolve ACCOUNTANT INPUTs)"
     _label(ws1, r, 1, plug_label, indent=1, italic=True)
-    cell_plug24 = ws1.cell(row=r, column=2, value=None)
+    ws1.cell(row=r, column=2, value=None)
     cell_plug = ws1.cell(row=r, column=3, value=plug)
     cell_plug.number_format = '"$"#,##0.00'
     cell_plug.alignment = Alignment(horizontal="right")
@@ -1274,7 +1290,7 @@ def write_excel(bs: dict) -> str:
     ws2["A2"].font = Font(name="Calibri", size=8.5, italic=True, color="555555")
 
     def _tax_recon_section(ws, start_row: int, tax_label: str, rows: list,
-                           rate: float, discount_eligible: bool = False) -> int:
+                           rate: float) -> int:
         """Write one tax type's reconciliation block. Returns next available row."""
         r = start_row
         # Section header
@@ -1367,7 +1383,7 @@ def write_excel(bs: dict) -> str:
     r = 4
     r = _tax_recon_section(ws2, r, "MB Gross Receipts Tax (6.7% — LOV3 expense)", MB_GR, MB_GR_RATE)
     r = _tax_recon_section(ws2, r, "MB Sales Tax (8.25% — collected from customers, pass-through liability)", MB_SALES, MB_SALES_RATE)
-    r = _tax_recon_section(ws2, r, "Sales & Use Tax (8.25% — collected on non-MB taxable sales; S&U only eligible for 0.5% timely-filer discount)", SALES_USE, SU_RATE, discount_eligible=True)
+    r = _tax_recon_section(ws2, r, "Sales & Use Tax (8.25% — collected on non-MB taxable sales; S&U only eligible for 0.5% timely-filer discount)", SALES_USE, SU_RATE)
 
     # Cross-check section: MB Sales vs MB GR implied receipts base
     ws2.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
@@ -1540,13 +1556,7 @@ def write_excel(bs: dict) -> str:
          "S&U filed quarterly (Q1=period 251; Q2=period 252) then monthly from Jul 2025. "
          "This tab distributes Q1/Q2 S&U evenly across 3 months for comparability. "
          "No adjustment — this is a presentation choice for this variance analysis only."),
-        ("5. MB step change (Flag 1)",
-         "Jul–Aug 2025 filed MB base matches Toast POS to the dollar (variance <$6), validating the comparison method. "
-         "Jan–Jun and Sep–Dec filings imply only ~$28K–$80K/mo of taxable receipts vs Toast $230K–$350K/mo — "
-         "probable under-filing requiring amended returns, consistent with the struck/amended 2504–2505 returns "
-         "and a mid-2025 Comptroller correction that did not persist after August. "
-         "~$2.18M MB base and ~$442K non-MB base at issue for the year. "
-         "ACCOUNTANT REVIEW REQUIRED before any revenue adjustment is booked."),
+        ("5. MB step change (Flag 1)", MB_STEP_CHANGE_NARRATIVE),
         ("6. $59,175 legal order (RESOLVED)",
          "Debit 2025-08-25 reversed 2025-08-29, net = $0. "
          "RECOMMENDATION: if this was booked as OPEX in the 2025 P&L, reverse the entry. No balance sheet impact."),
@@ -1605,15 +1615,7 @@ def write_excel(bs: dict) -> str:
     spec_flags = [
         ("SPEC FLAG 1",
          "MB GR Step Change — Probable Under-Filing 10 of 12 Months",
-         "Jul–Aug 2025 (periods 2507–2508) filed MB base matches Toast POS to the dollar (variance <$6), "
-         "validating the comparison method. "
-         "Under-filed MB GR periods: 2501–2506 (liabilities $1,863–$4,616/mo) AND 2509–2512 (~$4.2–5.3K/mo); "
-         "only 2507–2508 (~$17–22K/mo) match Toast. "
-         "Amended/struck returns for 2504–2505 are consistent with a mid-2025 Comptroller correction "
-         "that did NOT persist after August. "
-         "~$2.18M MB base and ~$442K non-MB base probable under-filing across 10 of 12 months. "
-         "Refer to BAED and consider amended Comptroller returns. "
-         "ACCOUNTANT REVIEW REQUIRED before any revenue adjustment is booked."),
+         MB_STEP_CHANGE_NARRATIVE),
         ("SPEC FLAG 2",
          "$59,175 Classification — RESOLVED",
          "TX Comptroller legal hold debit of $59,175 on 2025-08-25 was FULLY REVERSED on 2025-08-29. "
@@ -1621,9 +1623,9 @@ def write_excel(bs: dict) -> str:
          "If this was booked as an expense in the 2025 P&L, that entry must be reversed before filing."),
         ("SPEC FLAG 3",
          "2024 Liability Presentation Change",
-         "2024 Schedule L reported $0 total liabilities. "
-         "This 2025 balance sheet introduces $29,457.49 taxes payable (accrual-basis recognition "
-         "for periods 2511/2512 paid Jan/Feb 2026). "
+         f"2024 Schedule L reported $0 total liabilities. "
+         f"This 2025 balance sheet introduces ${bs['liabilities']['taxes_payable']:,.2f} taxes payable "
+         f"(accrual-basis recognition for periods 2511/2512 paid Jan/Feb 2026). "
          "This is not an error — it is an accounting policy change. "
          "Accountant: document the change in the return notes / footnote."),
         ("SPEC FLAG 4",
@@ -1716,15 +1718,19 @@ def write_pdf(bs: dict) -> str:
 
     Returns the output path.
     """
-    from reportlab.lib import colors as rl_colors
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
-    from reportlab.lib.pagesizes import LETTER
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import inch
-    from reportlab.platypus import (
-        BaseDocTemplate, Frame, KeepTogether, PageBreak, PageTemplate,
-        Paragraph, Spacer, Table, TableStyle,
-    )
+    try:
+        from reportlab.lib import colors as rl_colors
+        from reportlab.lib.pagesizes import LETTER
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.platypus import (
+            BaseDocTemplate, Frame, KeepTogether, PageBreak, PageTemplate,
+            Paragraph, Spacer, Table, TableStyle,
+        )
+    except ImportError:
+        import sys
+        print("reportlab not installed. Run: pip install reportlab", file=sys.stderr)
+        sys.exit(1)
     from datetime import datetime
     import zoneinfo
 
@@ -1737,7 +1743,6 @@ def write_pdf(bs: dict) -> str:
     RULE     = rl_colors.HexColor("#e5e5e5")
     AMBER    = rl_colors.HexColor("#D4A24C")
     RED      = rl_colors.HexColor("#C97064")
-    GREEN    = rl_colors.HexColor("#7FB069")
     BLUE     = rl_colors.HexColor("#5A8CBF")
 
     _ss = getSampleStyleSheet()
@@ -1749,10 +1754,6 @@ def write_pdf(bs: dict) -> str:
     STYLE_H2 = ParagraphStyle(
         "h2", parent=_ss["Heading2"], fontSize=13, leading=16,
         textColor=BLACK, spaceBefore=14, spaceAfter=6, fontName="Helvetica-Bold",
-    )
-    STYLE_H3 = ParagraphStyle(
-        "h3", parent=_ss["Heading3"], fontSize=11, leading=14,
-        textColor=BLACK, spaceBefore=8, spaceAfter=4, fontName="Helvetica-Bold",
     )
     STYLE_EYEBROW = ParagraphStyle(
         "eyebrow", parent=_ss["BodyText"], fontSize=8, leading=10,
@@ -1772,9 +1773,6 @@ def write_pdf(bs: dict) -> str:
     STYLE_NOTE = ParagraphStyle(
         "note", parent=_ss["BodyText"], fontSize=8.5, leading=11,
         textColor=BONE, spaceAfter=4, leftIndent=12,
-    )
-    STYLE_CENTER = ParagraphStyle(
-        "center", parent=STYLE_BODY, alignment=TA_CENTER,
     )
 
     TABLE_HDR = TableStyle([
@@ -1898,7 +1896,8 @@ def write_pdf(bs: dict) -> str:
     story.append(tbl)
     story.append(Spacer(1, 0.15 * inch))
     story.append(Paragraph(
-        "The unreconciled difference ($123,575) is a plug that forces the sheet to balance. "
+        f"The unreconciled difference ({_money(bs['unreconciled_difference'])}) is a plug "
+        "that forces the sheet to balance. "
         "It will collapse to $0 when cash, net income 2025, depreciation, AP, and accrued payroll "
         "are supplied by the accountant.",
         STYLE_NOTE,
@@ -1973,15 +1972,7 @@ def write_pdf(bs: dict) -> str:
          "S&U was filed quarterly for H1 2025 (Q1 = period 251, Q2 = period 252). "
          "Monthly variances in Jan–Jun reflect equal distribution of the quarterly filing across 3 months. "
          "The annual total is precise."),
-        ("MB step change — probable under-filing",
-         "Jul–Aug 2025 filed MB base matches Toast POS to the dollar (variance <$6), validating the comparison method. "
-         "Jan–Jun and Sep–Dec filings imply only ~$28K–$80K/mo vs Toast $230K–$350K/mo — "
-         "probable under-filing concentrated in 10 of 12 months. "
-         "Only Jul–Aug (periods 2507–2508) match Toast; the mid-2025 Comptroller correction "
-         "did not persist after August. "
-         "~$2.18M MB base at issue for the year. "
-         "Refer to BAED and consider amended Comptroller returns. "
-         "Flagged for review — not restated as fact pending accountant confirmation."),
+        ("MB step change — probable under-filing", MB_STEP_CHANGE_NARRATIVE),
         ("Service charges",
          "Mandatory 20% service charge is LOV3 revenue (IRS Rev. Rul. 2012-18, not gratuity). "
          "Included in net_price and likely included in Comptroller receipts. No adjustment needed."),
@@ -2104,7 +2095,7 @@ def write_pdf(bs: dict) -> str:
          "Record Predictive Insights LLC monthly hookah deposits as additive revenue (not in Toast POS)"],
         ["6", "Owner Distributions",        "Cash / Partners' Capital",
          _pf(abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])),
-         "Confirm BQ bank-category total ($225,496) reconciles to K-1 distributions before filing"],
+         f"Confirm BQ bank-category total ({_pf(abs(BQ_RESULTS['owner_distributions_2025']['combined_owner_attributable']))}) reconciles to K-1 distributions before filing"],
     ]
     tbl_adj = Table(adj_rows,
                     colWidths=[body_w * 0.04, body_w * 0.20, body_w * 0.20,
