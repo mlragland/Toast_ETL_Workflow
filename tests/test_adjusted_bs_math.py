@@ -72,3 +72,14 @@ def test_match_legal_order_synthetic_two_payment_combo():
     assert result["matched"] is True
     assert any(len(m) >= 2 for m in result["matches"])
     assert "tax remittance" in result["classification"].lower()
+
+
+def test_match_legal_order_no_match_no_reversal_security_bond():
+    """With no WebFile match and no reversal rows, classification should be
+    Security Bond / Other Assets."""
+    # Use injected empty reversal pool so the test is independent of BQ_RESULTS.
+    result = match_legal_order(rows=[], reversal_rows=[])
+    assert result["matched"] is False
+    assert result["matches"] == []
+    assert "security bond" in result["classification"].lower()
+    assert "other assets" in result["classification"].lower()

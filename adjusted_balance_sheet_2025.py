@@ -13,6 +13,7 @@ without triggering any BigQuery, Flask, or optional-dependency imports.
 """
 
 from collections import defaultdict
+from itertools import combinations
 
 # ---------------------------------------------------------------------------
 # Tax rates
@@ -205,6 +206,7 @@ def match_legal_order(
     window: tuple = ("2025-07-01", "2025-09-30"),
     tolerance: float = 0.01,
     rows: list | None = None,
+    reversal_rows: list | None = None,
 ) -> dict:
     """Search WebFile payment rows for a single payment or same-day combination
     (across MB_GR, MB_SALES, SALES_USE) equal to `amount` within `window`.
@@ -222,6 +224,11 @@ def match_legal_order(
         three module-level constants (MB_GR, MB_SALES, SALES_USE) are combined.
         Each row must be a 7-tuple: (txn_type, filed_date, ref, period,
         period_end, amount, struck).
+    reversal_rows : list | None
+        Override the BankTransactions rows scanned for a positive reversal
+        matching ``amount``.  Each row must be a 3-tuple:
+        ``(date_str, description, amount)``.  When None defaults to
+        ``BQ_RESULTS.get("legal_order_rows", [])``.
 
     Returns
     -------
@@ -236,14 +243,12 @@ def match_legal_order(
         *classification* — one of three strings depending on outcome:
         - matched → "tax remittance — matches WebFile payment(s); reclassify
           from legal order to tax payment"
-        - not matched + reversal in BQ_RESULTS → "temporary hold, fully
-          reversed 2025-08-29, net zero — no balance sheet impact; remove from
+        - not matched + reversal found → "temporary hold, fully reversed
+          <reversal_date>, net zero — no balance sheet impact; remove from
           OPEX if booked as expense"
         - not matched + no reversal → "TX Comptroller Security Bond
           (unconfirmed) — Other Assets, flag for accountant"
     """
-    from itertools import combinations as _combinations
-
     window_start, window_end = window
 
     # Build the candidate pool from the three constants (or injected rows).
@@ -290,13 +295,11 @@ def match_legal_order(
             if abs(row["amount"] - amount) <= tolerance:
                 matches.append([row])
 
-        # Check all pairwise and full-day-total combinations (avoid re-checking
-        # single rows already caught above).
+        # Check all same-day subsets of size 2..n (single rows already caught above).
         for r in range(2, len(day_rows) + 1):
-            for combo in _combinations(day_rows, r):
+            for combo in combinations(day_rows, r):
                 combo_sum = sum(c["amount"] for c in combo)
                 if abs(combo_sum - amount) <= tolerance:
-                    # Avoid adding a duplicate if it exactly overlaps a single match.
                     matches.append(list(combo))
 
     if matches:
@@ -306,15 +309,20 @@ def match_legal_order(
         )
         return {"matched": True, "matches": matches, "classification": classification}
 
-    # Not matched — check for the reversal row in BQ_RESULTS.
-    reversal_present = any(
-        row_amount > 0 and abs(row_amount - amount) <= tolerance
-        for _, _, row_amount in BQ_RESULTS.get("legal_order_rows", [])
+    # Not matched — check for the reversal row in BQ_RESULTS (or injected rows).
+    _reversal_pool = (
+        reversal_rows if reversal_rows is not None
+        else BQ_RESULTS.get("legal_order_rows", [])
     )
+    reversal_date: str | None = None
+    for row_date, _, row_amount in _reversal_pool:
+        if row_amount > 0 and abs(row_amount - amount) <= tolerance:
+            reversal_date = row_date
+            break
 
-    if reversal_present:
+    if reversal_date is not None:
         classification = (
-            "temporary hold, fully reversed 2025-08-29, net zero — "
+            f"temporary hold, fully reversed {reversal_date}, net zero — "
             "no balance sheet impact; remove from OPEX if booked as expense"
         )
     else:
