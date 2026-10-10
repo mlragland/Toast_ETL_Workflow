@@ -201,8 +201,101 @@ def implied_receipts(liabs: dict, rate: float) -> dict:
 
 
 # ---------------------------------------------------------------
-# BigQuery snapshots — pulled 2026-10-10. Rerun the queries in
-# PROMPT_2025_ADJUSTED_BALANCE_SHEET.md to refresh.
+# Reproducibility — SQL used to generate the snapshots below.
+# Project: toast-analytics-444116  Dataset: toast_raw
+# All queries use processing_date (DATE) which already encodes
+# the 4 AM CT business-day cutoff stored at ingest time.
+# Run with: bq query --nouse_legacy_sql '<sql>'
+# ---------------------------------------------------------------
+BQ_QUERIES = {
+    # Step 1 — enumerate every sales_category and its 2025 full-year net_price.
+    # MB bucket = Liquor, Wine, Bottled Beer.  NON_MB = everything else.
+    "sales_category_classification": """
+SELECT
+    sales_category,
+    ROUND(SUM(CAST(net_price AS FLOAT64)), 2) AS total_net_price,
+    COUNT(*) AS row_count
+FROM `toast-analytics-444116.toast_raw.ItemSelectionDetails_raw`
+WHERE processing_date BETWEEN '2025-01-01' AND '2025-12-31'
+    AND (voided IS NULL OR voided = 'false')
+GROUP BY sales_category
+ORDER BY total_net_price DESC
+""",
+
+    # Step 2 — monthly MB vs NON_MB revenue (business-day basis, net_price sum).
+    # Also breaks out individual categories to match the per-category comments below.
+    "monthly_revenue_2025": """
+SELECT
+    FORMAT_DATE('%Y-%m', processing_date) AS month,
+    ROUND(SUM(CASE WHEN sales_category IN ('Liquor', 'Wine', 'Bottled Beer')
+                   THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS MB_rev,
+    ROUND(SUM(CASE WHEN sales_category NOT IN ('Liquor', 'Wine', 'Bottled Beer')
+                   THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS NON_MB_rev,
+    ROUND(SUM(CASE WHEN sales_category = 'Liquor'       THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS liquor_rev,
+    ROUND(SUM(CASE WHEN sales_category = 'Wine'         THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS wine_rev,
+    ROUND(SUM(CASE WHEN sales_category = 'Bottled Beer' THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS beer_rev,
+    ROUND(SUM(CASE WHEN sales_category = 'Food'         THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS food_rev,
+    ROUND(SUM(CASE WHEN sales_category = 'NA Beverage'  THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS na_bev_rev,
+    ROUND(SUM(CASE WHEN sales_category = 'Hookah'       THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS hookah_rev,
+    ROUND(SUM(CASE WHEN sales_category IN ('(none)', 'Door')
+                   THEN CAST(net_price AS FLOAT64) ELSE 0 END), 2) AS other_rev
+FROM `toast-analytics-444116.toast_raw.ItemSelectionDetails_raw`
+WHERE processing_date BETWEEN '2025-01-01' AND '2025-12-31'
+    AND (voided IS NULL OR voided = 'false')
+GROUP BY month
+ORDER BY month
+""",
+
+    # Step 3 — cash position at year-end.
+    # Returns the last running_balance row on 2025-12-31 (intraday low after
+    # payroll wire; use BofA Dec-2025 statement closing balance instead).
+    "cash_balance_20251231": """
+SELECT
+    transaction_date,
+    description,
+    amount,
+    running_balance
+FROM `toast-analytics-444116.toast_raw.BankTransactions_raw`
+WHERE transaction_date = '2025-12-31'
+ORDER BY running_balance ASC
+LIMIT 5
+""",
+
+    # Step 4 — legal order debit/reversal rows in Aug 2025.
+    # Searches for ABS(amount) matching ±59,175 in the Aug 2025 window.
+    "legal_order_rows": """
+SELECT
+    transaction_date,
+    description,
+    amount
+FROM `toast-analytics-444116.toast_raw.BankTransactions_raw`
+WHERE transaction_date BETWEEN '2025-08-01' AND '2025-08-31'
+    AND ABS(amount) = 59175
+ORDER BY transaction_date
+""",
+
+    # Step 5 — 2025 owner-attributable spend from BankTransactions_raw.
+    # Matches the three owner-labeled categories in the LOV3 numbered taxonomy.
+    "owner_distributions_2025": """
+SELECT
+    category,
+    COUNT(*) AS txn_count,
+    ROUND(SUM(amount), 2) AS total_amount
+FROM `toast-analytics-444116.toast_raw.BankTransactions_raw`
+WHERE transaction_date BETWEEN '2025-01-01' AND '2025-12-31'
+    AND (
+        REGEXP_CONTAINS(LOWER(category), r'owner draws')
+        OR REGEXP_CONTAINS(LOWER(category), r'owner discretionary')
+        OR REGEXP_CONTAINS(LOWER(category), r'owner travel')
+    )
+GROUP BY category
+ORDER BY total_amount
+""",
+}
+
+# ---------------------------------------------------------------
+# BigQuery snapshots — pulled 2026-10-10. Rerun the SQL in
+# BQ_QUERIES above to refresh these snapshots.
 # ---------------------------------------------------------------
 BQ_RESULTS = {
     # Step 1 — sales category classification
@@ -224,7 +317,7 @@ BQ_RESULTS = {
     #   Bottled Beer    21,913.15
     #   (none)           1,368.71
     #   Door               760.00
-    # MB total: 3,495,820.73  |  NON_MB total: 931,563.43
+    # MB total: 3,495,820.73  |  NON_MB total: 931,563.44
 
     # Step 2 — monthly revenue by bucket (business-day basis, 2025-01 through 2025-12)
     "monthly_revenue_2025": {
