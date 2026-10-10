@@ -926,14 +926,1349 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
     }
 
 
-if __name__ == "__main__":
-    import json
+# ---------------------------------------------------------------------------
+# Helper: period code → human label, e.g. "2511" → "Nov 2025"
+# ---------------------------------------------------------------------------
+
+_MONTH_NAMES = {
+    "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
+    "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
+    "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec",
+}
+
+
+def _period_label(period: str) -> str:
+    """Convert a Comptroller period code to a human label.
+
+    Standard monthly codes (4-digit YYMM):
+        "2511" → "Nov 2025"
+    Quarterly S&U shorthand (3-digit YYQ):
+        "251" → "Q1 2025 (Jan–Mar)"
+        "252" → "Q2 2025 (Apr–Jun)"
+    2024 carry-over:
+        "244" → "Q4 2024 (Oct–Dec)"
+    """
+    if len(period) == 4:
+        yy = period[:2]
+        mm = period[2:]
+        year = f"20{yy}"
+        month = _MONTH_NAMES.get(mm, mm)
+        return f"{month} {year}"
+    if len(period) == 3:
+        yy = period[:2]
+        q = period[2]
+        year = f"20{yy}"
+        quarter_labels = {
+            "1": "Q1 (Jan–Mar)",
+            "2": "Q2 (Apr–Jun)",
+            "3": "Q3 (Jul–Sep)",
+            "4": "Q4 (Oct–Dec)",
+        }
+        return f"{quarter_labels.get(q, 'Q' + q)} {year}"
+    return period
+
+
+def _monthly_variance_table() -> list:
+    """Return per-month variance rows comparing Toast book revenue to filed
+    implied receipts.
+
+    Each row is a dict with keys:
+        month, toast_mb, toast_non_mb, toast_total,
+        filed_mb_liab, filed_non_mb_liab,
+        implied_mb_receipts, implied_non_mb_receipts,
+        var_mb, var_non_mb
+    where var_* = toast_book − implied_receipts (positive = book > filed).
+
+    Toast uses 4 AM CT business-day cutoff; Comptroller periods end on the
+    last calendar day of the month.  Small timing differences are expected.
+    """
+    mb_liabs = period_liabilities(MB_GR)          # keyed by period code e.g. "2501"
+    mb_sales_liabs = period_liabilities(MB_SALES)  # same base → cross-check
+    su_liabs = period_liabilities(SALES_USE)
+
+    rows = []
+    for month_key in sorted(BQ_RESULTS["monthly_revenue_2025"]):
+        # month_key = "2025-01" etc.
+        yy = month_key[2:4]    # "25"
+        mm = month_key[5:7]    # "01"
+        period = f"{yy}{mm}"   # "2501"
+
+        toast_mb = BQ_RESULTS["monthly_revenue_2025"][month_key]["MB"]
+        toast_non_mb = BQ_RESULTS["monthly_revenue_2025"][month_key]["NON_MB"]
+        toast_total = round(toast_mb + toast_non_mb, 2)
+
+        # Filed liabilities (may be quarterly for S&U in H1 2025)
+        filed_mb_gr = mb_liabs.get(period, 0.0)
+        filed_mb_sales = mb_sales_liabs.get(period, 0.0)
+
+        # S&U: Q1=251 covers Jan/Feb/Mar; Q2=252 covers Apr/May/Jun
+        # Distribute quarterly amounts equally across the 3 months in the quarter
+        if mm in ("01", "02", "03"):
+            su_period = f"{yy}1"  # "251"
+            su_quarter_liab = su_liabs.get(su_period, 0.0)
+            filed_su = round(su_quarter_liab / 3, 2)
+        elif mm in ("04", "05", "06"):
+            su_period = f"{yy}2"  # "252"
+            su_quarter_liab = su_liabs.get(su_period, 0.0)
+            filed_su = round(su_quarter_liab / 3, 2)
+        else:
+            filed_su = su_liabs.get(period, 0.0)
+
+        # Implied receipts from each tax
+        impl_mb_gr = round(filed_mb_gr / MB_GR_RATE, 2) if filed_mb_gr else 0.0
+        impl_mb_sales = round(filed_mb_sales / MB_SALES_RATE, 2) if filed_mb_sales else 0.0
+        impl_su = round(filed_su / SU_RATE, 2) if filed_su else 0.0
+
+        var_mb = round(toast_mb - impl_mb_gr, 2)
+        var_non_mb = round(toast_non_mb - impl_su, 2)
+
+        rows.append({
+            "month": month_key,
+            "label": f"{_MONTH_NAMES[mm]} 2025",
+            "toast_mb": toast_mb,
+            "toast_non_mb": toast_non_mb,
+            "toast_total": toast_total,
+            "filed_mb_gr_liab": filed_mb_gr,
+            "filed_mb_sales_liab": filed_mb_sales,
+            "filed_su_liab": filed_su,
+            "implied_mb_gr_receipts": impl_mb_gr,
+            "implied_mb_sales_receipts": impl_mb_sales,
+            "implied_su_receipts": impl_su,
+            "var_mb": var_mb,
+            "var_non_mb": var_non_mb,
+        })
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Excel writer (Tab 1–4)
+# ---------------------------------------------------------------------------
+
+XLSX_PATH = "LOV3_HTX_2025_Adjusted_Balance_Sheet.xlsx"
+
+# Colours
+_YELLOW = "FFFF00"
+_HEADER_FILL = "1A1A1A"   # near-black
+_ALT_FILL    = "F5F5F0"   # light cream
+_GOLD_FILL   = "B8956A"   # section header gold
+_RED_FILL    = "FDECEA"
+
+
+def write_excel(bs: dict) -> str:
+    """Write the four-tab workbook.  openpyxl is imported lazily here.
+
+    Returns the output path.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import (
+        Alignment, Border, Font, PatternFill, Side,
+    )
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+
+    # ------------------------------------------------------------------ helpers
+    def _hdr_font(bold=True, color="FFFFFF", size=10):
+        return Font(name="Calibri", bold=bold, color=color, size=size)
+
+    def _body_font(bold=False, color="000000", size=9.5):
+        return Font(name="Calibri", bold=bold, color=color, size=size)
+
+    def _fill(hex_color):
+        return PatternFill("solid", fgColor=hex_color)
+
+    def _thin_border():
+        thin = Side(border_style="thin", color="CCCCCC")
+        return Border(bottom=thin)
+
+    def _bottom_border():
+        med = Side(border_style="medium", color="1A1A1A")
+        return Border(bottom=med)
+
+    def _currency(ws, row, col, value, is_input=False):
+        """Write a currency value; highlight yellow if ACCOUNTANT INPUT."""
+        cell = ws.cell(row=row, column=col, value=value)
+        cell.number_format = '"$"#,##0.00'
+        cell.alignment = Alignment(horizontal="right")
+        cell.font = _body_font()
+        if is_input:
+            cell.fill = _fill(_YELLOW)
+        return cell
+
+    def _label(ws, row, col, text, bold=False, indent=0, italic=False):
+        cell = ws.cell(row=row, column=col, value=text)
+        cell.font = Font(name="Calibri", bold=bold, size=9.5, italic=italic)
+        if indent:
+            cell.alignment = Alignment(horizontal="left", indent=indent)
+        return cell
+
+    def _section_hdr(ws, row, text, ncols=4, color=_GOLD_FILL):
+        """Merge + fill a section header row."""
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
+        cell = ws.cell(row=row, column=1, value=text)
+        cell.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10)
+        cell.fill = _fill(color)
+        cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+
+    def _col_hdr(ws, row, col, text):
+        cell = ws.cell(row=row, column=col, value=text)
+        cell.font = _hdr_font()
+        cell.fill = _fill(_HEADER_FILL)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        return cell
+
+    def _total_row(ws, row, label, val_2024, val_2025, ncols=4, bold=True):
+        cell_l = ws.cell(row=row, column=1, value=label)
+        cell_l.font = Font(name="Calibri", bold=bold, size=9.5)
+        cell_l.border = _bottom_border()
+        for col, val in ((2, val_2024), (3, val_2025)):
+            cell = ws.cell(row=row, column=col, value=val)
+            cell.number_format = '"$"#,##0.00'
+            cell.alignment = Alignment(horizontal="right")
+            cell.font = Font(name="Calibri", bold=bold, size=9.5)
+            cell.border = _bottom_border()
+
+    # ===================================================================
+    # TAB 1 — Balance Sheet
+    # ===================================================================
+    ws1 = wb.active
+    ws1.title = "Balance Sheet"
+
+    # Title block
+    ws1.merge_cells("A1:C1")
+    ws1["A1"] = "LOV3 Restaurant & Lounge LLC — Adjusted Balance Sheet (K-1 Prep)"
+    ws1["A1"].font = Font(name="Calibri", bold=True, size=14)
+    ws1.merge_cells("A2:C2")
+    ws1["A2"] = "Accrual Basis  |  Prepared for Sanchez Burnside / BAED Corporation"
+    ws1["A2"].font = Font(name="Calibri", size=9.5, italic=True, color="555555")
+    ws1.merge_cells("A3:C3")
+    ws1["A3"] = "ACCOUNTANT INPUT cells highlighted yellow — do not present as final until resolved"
+    ws1["A3"].font = Font(name="Calibri", size=9, italic=True, color="AA0000")
+
+    # Column headers
+    r = 5
+    _col_hdr(ws1, r, 1, "Account")
+    _col_hdr(ws1, r, 2, "12/31/2024\n(Schedule L)")
+    _col_hdr(ws1, r, 3, "12/31/2025\n(This Workbook)")
+
+    # Freeze pane at row 6
+    ws1.freeze_panes = "A6"
+
+    bb = BEGINNING_BALANCES
+    assets = bs["assets"]
+    liabilities = bs["liabilities"]
+    equity = bs["equity"]
+
+    r = 6
+    # ---- ASSETS ----
+    _section_hdr(ws1, r, "ASSETS", ncols=3)
+    r += 1
+
+    rows_assets = [
+        ("Cash",                    bb["cash"],                  assets["cash"],                  True),
+        ("Accounts Receivable",     bb["accounts_receivable"],   assets["accounts_receivable"],   True),
+        ("Inventory",               bb["inventory"],             assets["inventory"],             True),
+        ("Gross Fixed Assets",      bb["depreciable_assets"],    assets["gross_fixed_assets"],    False),
+        ("Less: Accum. Depreciation", bb["accumulated_depreciation"], assets["accumulated_depreciation"], True),
+        ("Net Fixed Assets",        bb["depreciable_assets"] - bb["accumulated_depreciation"],
+                                     assets["net_fixed_assets"],  False),
+    ]
+    for label, v24, v25, is_input in rows_assets:
+        bold_row = label.startswith("Net Fixed")
+        _label(ws1, r, 1, label, bold=bold_row, indent=1)
+        _currency(ws1, r, 2, v24)
+        _currency(ws1, r, 3, v25, is_input=(is_input and label not in ("Net Fixed Assets",)))
+        r += 1
+
+    _total_row(ws1, r, "TOTAL ASSETS",
+               bb["total_assets"],
+               bs["total_assets"])
+    r += 2
+
+    # ---- LIABILITIES ----
+    _section_hdr(ws1, r, "LIABILITIES", ncols=3)
+    r += 1
+
+    rows_liab = [
+        ("Taxes Payable (TX Comptroller)",   0.0,  liabilities["taxes_payable"],   False),
+        ("Accounts Payable",                 0.0,  liabilities["accounts_payable"], True),
+        ("Accrued Payroll",                  0.0,  liabilities["accrued_payroll"],  True),
+    ]
+    for label, v24, v25, is_input in rows_liab:
+        _label(ws1, r, 1, label, indent=1)
+        _currency(ws1, r, 2, v24)
+        _currency(ws1, r, 3, v25, is_input=is_input)
+        r += 1
+
+    _total_row(ws1, r, "TOTAL LIABILITIES", 0.0, bs["total_liabilities"])
+    r += 2
+
+    # ---- EQUITY ----
+    _section_hdr(ws1, r, "PARTNERS' CAPITAL", ncols=3)
+    r += 1
+
+    rows_eq = [
+        ("Beginning Partners' Capital (1/1/2025)", bb["partners_capital"],
+         equity["beginning_partners_capital"], False),
+        ("+ Capital Contributions 2025",   0.0,  equity["contributions_2025"],  True),
+        ("- Distributions 2025",           0.0,  equity["distributions_2025"],  False),
+        ("+ Net Income 2025",              0.0,  equity["net_income_2025"],      True),
+        ("Ending Partners' Capital (pre-plug)", 0.0,
+         equity["ending_partners_capital"], False),
+    ]
+    for label, v24, v25, is_input in rows_eq:
+        bold_row = "Ending" in label or "Beginning" in label
+        _label(ws1, r, 1, label, bold=bold_row, indent=1)
+        _currency(ws1, r, 2, v24 if v24 != 0.0 else None)
+        _currency(ws1, r, 3, v25, is_input=is_input)
+        r += 1
+
+    # Plug row
+    plug = equity["unreconciled_difference_plug"]
+    plug_label = "Unreconciled Difference (plug — resolve ACCOUNTANT INPUTs)"
+    _label(ws1, r, 1, plug_label, indent=1, italic=True)
+    cell_plug24 = ws1.cell(row=r, column=2, value=None)
+    cell_plug = ws1.cell(row=r, column=3, value=plug)
+    cell_plug.number_format = '"$"#,##0.00'
+    cell_plug.alignment = Alignment(horizontal="right")
+    cell_plug.font = Font(name="Calibri", italic=True, color="AA0000", size=9.5)
+    r += 1
+
+    _total_row(ws1, r, "TOTAL EQUITY",
+               bb["partners_capital"],
+               bs["total_equity"])
+    r += 2
+
+    # Tie-check row
+    _total_row(ws1, r, "TOTAL LIABILITIES + EQUITY",
+               bb["total_assets"],
+               round(bs["total_liabilities"] + bs["total_equity"], 2))
+    r += 2
+
+    # Note
+    note_cell = ws1.cell(row=r, column=1,
+        value="* Cells highlighted yellow require accountant input before this balance sheet is final.")
+    note_cell.font = Font(name="Calibri", size=8.5, italic=True, color="AA0000")
+    ws1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
+
+    # Column widths
+    ws1.column_dimensions["A"].width = 48
+    ws1.column_dimensions["B"].width = 22
+    ws1.column_dimensions["C"].width = 22
+
+    # ===================================================================
+    # TAB 2 — Tax Reconciliation
+    # ===================================================================
+    ws2 = wb.create_sheet("Tax Reconciliation")
+
+    ws2.merge_cells("A1:H1")
+    ws2["A1"] = "Texas Comptroller Tax Reconciliation — 2025 (All three accounts)"
+    ws2["A1"].font = Font(name="Calibri", bold=True, size=13)
+    ws2.merge_cells("A2:H2")
+    ws2["A2"] = (
+        "Period codes: YYMM (monthly) or YYQ (quarterly).  "
+        "Struck rows excluded from all totals.  "
+        "MB Sales ÷ 0.0825 vs MB GR ÷ 0.067 — same alcohol base, "
+        "divergence flagged in rightmost column."
+    )
+    ws2["A2"].font = Font(name="Calibri", size=8.5, italic=True, color="555555")
+
+    def _tax_recon_section(ws, start_row: int, tax_label: str, rows: list,
+                           rate: float, discount_eligible: bool = False) -> int:
+        """Write one tax type's reconciliation block. Returns next available row."""
+        r = start_row
+        # Section header
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+        cell = ws.cell(row=r, column=1,
+                       value=f"{tax_label}  (rate: {rate*100:.3g}%)")
+        cell.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10)
+        cell.fill = _fill(_HEADER_FILL)
+        r += 1
+
+        # Sub-header
+        headers = [
+            "Period Code", "Period Name", "Filed Date", "Type",
+            "Filed Liability ($)", "Payments Made ($)",
+            "Penalties & Interest ($)", "Implied Receipts ($)",
+        ]
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(row=r, column=c, value=h)
+            cell.font = _hdr_font(size=8.5)
+            cell.fill = _fill("444444")
+            cell.alignment = Alignment(horizontal="center", wrap_text=True, vertical="center")
+        r += 1
+
+        # Data rows — per period
+        liabs = period_liabilities(rows)
+        pays  = period_payments(rows)
+        pi    = penalties_and_interest(rows)
+        impl  = implied_receipts(liabs, rate)
+
+        # Get unique periods in calendar order
+        periods_seen = sorted({row[3] for row in rows if not row[6] and row[0] in ("return", "amended")
+                                and _period_year(row[4]) == 2025})
+
+        for i, period in enumerate(periods_seen):
+            fill_alt = _fill(_ALT_FILL) if i % 2 else None
+            pname = _period_label(period)
+
+            # Find the latest relevant filed_date for this period
+            relevant = [row[1] for row in rows
+                        if row[3] == period and not row[6] and row[0] in ("return", "amended")]
+            filed_date = max(relevant) if relevant else "—"
+            txn_types = list({row[0] for row in rows
+                              if row[3] == period and not row[6]
+                              and row[0] in ("return", "amended")})
+            txn_type_str = "/".join(txn_types)
+
+            liab_val = liabs.get(period, 0.0)
+            pay_val  = pays.get(period, 0.0)
+            pi_val   = pi.get(period, 0.0)
+            impl_val = impl.get(period, 0.0)
+
+            row_data = [period, pname, filed_date, txn_type_str,
+                        liab_val, pay_val, pi_val, impl_val]
+
+            for c, val in enumerate(row_data, 1):
+                cell = ws.cell(row=r, column=c, value=val)
+                if c in (5, 6, 7, 8):
+                    cell.number_format = '"$"#,##0.00'
+                    cell.alignment = Alignment(horizontal="right")
+                    # Highlight P&I > 0 in amber
+                    if c == 7 and val > 0.01:
+                        cell.fill = _fill("FFE8A0")
+                else:
+                    cell.alignment = Alignment(horizontal="left")
+                cell.font = _body_font(size=9)
+                if fill_alt:
+                    cell.fill = fill_alt
+            r += 1
+
+        # Annual totals row
+        annual_liab  = sum(liabs.values())
+        annual_pay   = sum(pays.values())
+        annual_pi    = sum(pi.values())
+        annual_impl  = sum(impl.values())
+
+        cell_l = ws.cell(row=r, column=1, value="ANNUAL TOTAL 2025")
+        cell_l.font = Font(name="Calibri", bold=True, size=9.5)
+        cell_l.border = _bottom_border()
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+        for c, val in enumerate([annual_liab, annual_pay, annual_pi, annual_impl], 5):
+            cell = ws.cell(row=r, column=c, value=round(val, 2))
+            cell.number_format = '"$"#,##0.00'
+            cell.alignment = Alignment(horizontal="right")
+            cell.font = Font(name="Calibri", bold=True, size=9.5)
+            cell.border = _bottom_border()
+
+        return r + 2
+
+    # Write all three tax types
+    r = 4
+    r = _tax_recon_section(ws2, r, "MB Gross Receipts Tax (6.7% — LOV3 expense)", MB_GR, MB_GR_RATE)
+    r = _tax_recon_section(ws2, r, "MB Sales Tax (8.25% — collected from customers, pass-through liability)", MB_SALES, MB_SALES_RATE)
+    r = _tax_recon_section(ws2, r, "Sales & Use Tax (8.25% — collected on non-MB taxable sales; S&U only eligible for 0.5% timely-filer discount)", SALES_USE, SU_RATE, discount_eligible=True)
+
+    # Cross-check section: MB Sales vs MB GR implied receipts base
+    ws2.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    hdr = ws2.cell(row=r, column=1,
+                   value="MB BASE CROSS-CHECK: MB Sales ÷ 0.0825  vs  MB GR ÷ 0.067  (same alcohol base — divergence is a flag)")
+    hdr.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10)
+    hdr.fill = _fill(_GOLD_FILL)
+    r += 1
+
+    xhdr = ["Period Code", "Period Name",
+            "MB Sales Implied Receipts ($)", "MB GR Implied Receipts ($)",
+            "Divergence ($)", "Divergence (%)"]
+    for c, h in enumerate(xhdr, 1):
+        cell = ws2.cell(row=r, column=c, value=h)
+        cell.font = _hdr_font(size=8.5)
+        cell.fill = _fill("444444")
+        cell.alignment = Alignment(horizontal="center", wrap_text=True, vertical="center")
+    r += 1
+
+    mb_sales_liabs = period_liabilities(MB_SALES)
+    mb_gr_liabs    = period_liabilities(MB_GR)
+    all_periods = sorted(set(list(mb_sales_liabs.keys()) + list(mb_gr_liabs.keys())))
+
+    for i, period in enumerate(all_periods):
+        impl_sales = round(mb_sales_liabs.get(period, 0.0) / MB_SALES_RATE, 2)
+        impl_gr    = round(mb_gr_liabs.get(period, 0.0)    / MB_GR_RATE,    2)
+        diverge    = round(impl_sales - impl_gr, 2)
+        diverge_pct = round((diverge / impl_gr * 100) if impl_gr else 0.0, 1)
+
+        fill_alt = _fill(_ALT_FILL) if i % 2 else None
+        row_data = [period, _period_label(period), impl_sales, impl_gr, diverge, diverge_pct]
+        for c, val in enumerate(row_data, 1):
+            cell = ws2.cell(row=r, column=c, value=val)
+            if c in (3, 4, 5):
+                cell.number_format = '"$"#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+            elif c == 6:
+                cell.number_format = '0.0"%"'
+                cell.alignment = Alignment(horizontal="right")
+                # Flag large divergences
+                if abs(diverge_pct) > 5:
+                    cell.fill = _fill(_RED_FILL)
+            else:
+                cell.alignment = Alignment(horizontal="left")
+            cell.font = _body_font(size=9)
+            if fill_alt and c != 6:
+                cell.fill = fill_alt
+        r += 1
+
+    # Column widths for ws2
+    for col, w in zip("ABCDEFGH", [12, 22, 14, 14, 14, 14, 14, 20]):
+        ws2.column_dimensions[get_column_letter(ord(col) - 64)].width = w
+
+    # ===================================================================
+    # TAB 3 — Revenue Adjustments
+    # ===================================================================
+    ws3 = wb.create_sheet("Revenue Adjustments")
+
+    ws3.merge_cells("A1:J1")
+    ws3["A1"] = "Revenue Adjustments — Toast Book vs Filed Implied Receipts, by Month/Bucket"
+    ws3["A1"].font = Font(name="Calibri", bold=True, size=13)
+    ws3.merge_cells("A2:J2")
+    ws3["A2"] = (
+        "Implied receipts = Filed Liability ÷ Rate.  "
+        "MB bucket: Liquor, Wine, Bottled Beer (TX § 183 — LOV3's MB tax is 6.7% expense; collected MB Sales 8.25% is pass-through).  "
+        "NON_MB: Food, NA Bev, Hookah, Door, (none)/NULL (TX S&U 8.25%).  "
+        "Toast excludes voided items ($176,422.30 annual); filed receipts cover net taxable sales."
+    )
+    ws3["A2"].font = Font(name="Calibri", size=8.5, italic=True, color="555555")
+
+    r = 4
+    rev_headers = [
+        "Month", "Toast MB ($)", "Toast NON-MB ($)", "Toast Total ($)",
+        "Filed MB GR Liab ($)", "MB GR Implied Receipts ($)",
+        "Filed S&U Liab ($)",   "S&U Implied Receipts ($)",
+        "Var MB (Book−Filed) ($)", "Var NON-MB (Book−Filed) ($)",
+    ]
+    for c, h in enumerate(rev_headers, 1):
+        cell = ws3.cell(row=r, column=c, value=h)
+        cell.font = _hdr_font(size=8.5)
+        cell.fill = _fill(_HEADER_FILL)
+        cell.alignment = Alignment(horizontal="center", wrap_text=True, vertical="center")
+    r += 1
+
+    var_rows = _monthly_variance_table()
+    annual_toast_mb = annual_toast_non_mb = annual_toast_total = 0.0
+    annual_impl_mb  = annual_impl_non_mb  = 0.0
+    annual_filed_mb_gr = annual_filed_su  = 0.0
+    annual_var_mb   = annual_var_non_mb   = 0.0
+
+    for i, row in enumerate(var_rows):
+        fill_alt = _fill(_ALT_FILL) if i % 2 else None
+        vals = [
+            row["label"],
+            row["toast_mb"],
+            row["toast_non_mb"],
+            row["toast_total"],
+            row["filed_mb_gr_liab"],
+            row["implied_mb_gr_receipts"],
+            row["filed_su_liab"],
+            row["implied_su_receipts"],
+            row["var_mb"],
+            row["var_non_mb"],
+        ]
+        for c, val in enumerate(vals, 1):
+            cell = ws3.cell(row=r, column=c, value=val)
+            if c == 1:
+                cell.alignment = Alignment(horizontal="left")
+            else:
+                cell.number_format = '"$"#,##0.00'
+                cell.alignment = Alignment(horizontal="right")
+                # Highlight large variances red
+                if c in (9, 10) and isinstance(val, float) and abs(val) > 20000:
+                    cell.fill = _fill(_RED_FILL)
+                elif fill_alt:
+                    cell.fill = fill_alt
+            cell.font = _body_font(size=9)
+        r += 1
+
+        annual_toast_mb      += row["toast_mb"]
+        annual_toast_non_mb  += row["toast_non_mb"]
+        annual_toast_total   += row["toast_total"]
+        annual_filed_mb_gr   += row["filed_mb_gr_liab"]
+        annual_impl_mb       += row["implied_mb_gr_receipts"]
+        annual_filed_su      += row["filed_su_liab"]
+        annual_impl_non_mb   += row["implied_su_receipts"]
+        annual_var_mb        += row["var_mb"]
+        annual_var_non_mb    += row["var_non_mb"]
+
+    # Annual totals
+    annual_vals = [
+        "ANNUAL 2025",
+        round(annual_toast_mb, 2),
+        round(annual_toast_non_mb, 2),
+        round(annual_toast_total, 2),
+        round(annual_filed_mb_gr, 2),
+        round(annual_impl_mb, 2),
+        round(annual_filed_su, 2),
+        round(annual_impl_non_mb, 2),
+        round(annual_var_mb, 2),
+        round(annual_var_non_mb, 2),
+    ]
+    for c, val in enumerate(annual_vals, 1):
+        cell = ws3.cell(row=r, column=c, value=val)
+        if c == 1:
+            cell.alignment = Alignment(horizontal="left")
+        else:
+            cell.number_format = '"$"#,##0.00'
+            cell.alignment = Alignment(horizontal="right")
+        cell.font = Font(name="Calibri", bold=True, size=9.5)
+        cell.border = _bottom_border()
+    r += 2
+
+    # Variance drivers note block
+    _section_hdr(ws3, r, "VARIANCE DRIVERS & RECOMMENDED ADJUSTMENTS", ncols=10, color=_GOLD_FILL)
+    r += 1
+
+    drivers = [
+        ("1. Toast basis (net of voids)",
+         "Toast BQ snapshot excludes voided items ($176,422.30 annual: MB $159,144 + NON-MB $17,278). "
+         "Filed receipts are also net of voided sales. Voids are not a variance driver — basis match is correct."),
+        ("2. Voided items — audit note",
+         "Void total $176,422.30 = 4.0% of gross POS. Cross-check: prior gross $4,427,384 − voids = $4,250,962 (matches BQ net). "
+         "No adjustment needed but the void rate should be reviewed annually for IRS/Comptroller consistency."),
+        ("3. Service charge exclusion",
+         "LOV3 levies a mandatory 20% service charge. Under IRS Rev. Rul. 2012-18 this is NOT gratuity — it is LOV3's revenue. "
+         "Service charges ARE included in net_price (MB or NON-MB bucket based on the parent item). "
+         "No adjustment needed; confirm with accountant that Comptroller receipts base also includes service charges."),
+        ("4. S&U quarterly vs monthly timing",
+         "S&U filed quarterly (Q1=period 251; Q2=period 252) then monthly from Jul 2025. "
+         "This tab distributes Q1/Q2 S&U evenly across 3 months for comparability. "
+         "No adjustment — this is a presentation choice for this variance analysis only."),
+        ("5. MB step change (Flag 1)",
+         "MB GR filings show a dramatic step change: Jan–Jun 2025 ~$1.9–4.1K/mo vs Jul+ ~$17–23K/mo. "
+         "This coincides with amended/struck returns for periods 2504–2505. "
+         "Accountant: confirm whether early-2025 under-filing is corrected or whether additional amendments are needed."),
+        ("6. $59,175 legal order (RESOLVED)",
+         "Debit 2025-08-25 reversed 2025-08-29, net = $0. "
+         "RECOMMENDATION: if this was booked as OPEX in the 2025 P&L, reverse the entry. No balance sheet impact."),
+        ("7. MB GR treatment",
+         "MB Gross Receipts Tax (6.7%) is LOV3's own operating expense — book as Taxes & Licenses. "
+         "Do NOT net from revenue. Collected MB Sales (8.25%) is a pass-through liability, NOT revenue."),
+        ("8. Cash not rung / off-POS revenue",
+         "Predictive Insights LLC monthly hookah deposits (May 2025+) are BankTransactions_raw entries, "
+         "not POS net_price. These are additive revenue not captured in Toast MB or NON-MB buckets. "
+         "Accountant: confirm Comptroller treatment of hookah revenue (MB? NON-MB? Exempt?)."),
+        ("9. Timing — 4 AM CT business-day cutoff",
+         "Toast records revenue using a 4 AM CT cutoff (1 AM Saturday = Friday business). "
+         "Comptroller periods end on the calendar last day of the month. "
+         "Near month-end sessions may shift across periods. Variances <1% of monthly revenue are immaterial."),
+    ]
+    for title, detail in drivers:
+        cell_t = ws3.cell(row=r, column=1, value=title)
+        cell_t.font = Font(name="Calibri", bold=True, size=9.5)
+        ws3.merge_cells(start_row=r, start_column=2, end_row=r, end_column=10)
+        cell_d = ws3.cell(row=r, column=2, value=detail)
+        cell_d.font = _body_font(size=9)
+        cell_d.alignment = Alignment(wrap_text=True, vertical="top")
+        ws3.row_dimensions[r].height = 28
+        r += 1
+
+    # Column widths ws3
+    ws3.column_dimensions["A"].width = 18
+    for col_letter in "BCDEFGHIJ":
+        ws3.column_dimensions[col_letter].width = 18
+    ws3.column_dimensions["B"].width = 60  # detail notes
+
+    # ===================================================================
+    # TAB 4 — Assumptions & Flags
+    # ===================================================================
+    ws4 = wb.create_sheet("Assumptions & Flags")
+
+    ws4.merge_cells("A1:C1")
+    ws4["A1"] = "Assumptions & Flags — LOV3 HTX 2025 Adjusted Balance Sheet"
+    ws4["A1"].font = Font(name="Calibri", bold=True, size=14)
+    ws4.merge_cells("A2:C2")
+    ws4["A2"] = (
+        "All items marked ACCOUNTANT INPUT must be resolved before this sheet is presented as final. "
+        "Items marked NOTE are informational; items marked WARNING require immediate attention."
+    )
+    ws4["A2"].font = Font(name="Calibri", size=9, italic=True, color="AA0000")
+
+    r = 4
+    _col_hdr(ws4, r, 1, "#")
+    _col_hdr(ws4, r, 2, "Category")
+    _col_hdr(ws4, r, 3, "Flag / Assumption Text")
+    r += 1
+
+    ws4.freeze_panes = "A5"
+
+    # The six spec-required flags first, then the flags from build_balance_sheet()
+    spec_flags = [
+        ("SPEC FLAG 1",
+         "MB GR Step Change",
+         "Periods 2503–2506 (Jan–Jun 2025) filed $1,863–$3,588/mo MB GR. "
+         "Periods 2507+ (Jul–Dec 2025) filed $17,097–$22,111/mo. "
+         "Amended/struck returns for 2504 and 2505 coincide with the step change. "
+         "Pattern suggests a mid-2025 Comptroller correction or audit trigger. "
+         "Accountant: compare early-2025 MB GR implied receipts (÷0.067) to Toast MB POS data "
+         "to quantify whether Jan–Jun 2025 months were under-filed."),
+        ("SPEC FLAG 2",
+         "$59,175 Classification — RESOLVED",
+         "TX Comptroller legal hold debit of $59,175 on 2025-08-25 was FULLY REVERSED on 2025-08-29. "
+         "Net = $0. No balance sheet asset, liability, or OPEX. "
+         "If this was booked as an expense in the 2025 P&L, that entry must be reversed before filing."),
+        ("SPEC FLAG 3",
+         "2024 Liability Presentation Change",
+         "2024 Schedule L reported $0 total liabilities. "
+         "This 2025 balance sheet introduces $29,457.49 taxes payable (accrual-basis recognition "
+         "for periods 2511/2512 paid Jan/Feb 2026). "
+         "This is not an error — it is an accounting policy change. "
+         "Accountant: document the change in the return notes / footnote."),
+        ("SPEC FLAG 4",
+         "2024 K-1 Allocation Consistency",
+         "2024 K-1 shows Maurice Ragland at 15% ownership but allocated 100% of the $(35,161) loss. "
+         "For 2025 K-1s: confirm ownership percentages for all three partners "
+         "(Maurice 15% confirmed; Eddiele B Jasper and Derwin James unknown) "
+         "and apply consistent allocation methodology per the LLC operating agreement."),
+        ("SPEC FLAG 5",
+         "Sales Tax Variance — Restate with Complete Data",
+         "Prior analysis cited a $3,249 sales tax variance. "
+         "This workbook uses the complete 2025 WebFile data (all three accounts, all periods). "
+         "Restate the variance using the Revenue Adjustments tab (Tab 3) annual totals, "
+         "which show annualized MB GR implied receipts vs Toast MB POS and "
+         "S&U implied receipts vs Toast NON-MB POS."),
+        ("SPEC FLAG 6",
+         "Accounts Receivable — $373,592",
+         "The 2024 Schedule L ending A/R balance of $373,592 is unusually large for a "
+         "cash-and-card restaurant. "
+         "Possible explanations: Toast settlement receivable, related-party advances, or prior-year "
+         "bookkeeping artifact. Accountant: confirm 2025 treatment (write-off, reclassify, or carry). "
+         "This figure is carried forward as the 2025 A/R placeholder in this workbook."),
+    ]
+
+    all_flags_for_tab = spec_flags[:]
+    # Add build_balance_sheet flags
+    for i, flag_text in enumerate(bs["flags"], 1):
+        # Categorise
+        if flag_text.startswith("ACCOUNTANT INPUT"):
+            cat = "ACCOUNTANT INPUT"
+        elif flag_text.startswith("WARNING"):
+            cat = "WARNING"
+        elif flag_text.startswith("NOTE"):
+            cat = "NOTE"
+        else:
+            cat = "NOTE"
+        all_flags_for_tab.append((f"BS FLAG {i}", cat, flag_text))
+
+    category_colors = {
+        "ACCOUNTANT INPUT": "FFF3CD",  # amber
+        "WARNING":          "F8D7DA",  # red
+        "NOTE":             "D1ECF1",  # blue
+        "SPEC FLAG 1":      "E8F5E9",
+        "SPEC FLAG 2":      "E8F5E9",
+        "SPEC FLAG 3":      "E8F5E9",
+        "SPEC FLAG 4":      "E8F5E9",
+        "SPEC FLAG 5":      "E8F5E9",
+        "SPEC FLAG 6":      "E8F5E9",
+    }
+
+    for i, flag_tuple in enumerate(all_flags_for_tab):
+        num_label, cat_label, text = flag_tuple
+        fill_hex = category_colors.get(num_label, category_colors.get(cat_label, "FFFFFF"))
+
+        cell_n = ws4.cell(row=r, column=1, value=num_label)
+        cell_n.font = Font(name="Calibri", bold=True, size=9)
+        cell_n.fill = _fill(fill_hex)
+        cell_n.alignment = Alignment(vertical="top")
+
+        cell_c = ws4.cell(row=r, column=2, value=cat_label)
+        cell_c.font = Font(name="Calibri", bold=True, size=9)
+        cell_c.fill = _fill(fill_hex)
+        cell_c.alignment = Alignment(vertical="top")
+
+        cell_t = ws4.cell(row=r, column=3, value=text)
+        cell_t.font = _body_font(size=9)
+        cell_t.alignment = Alignment(wrap_text=True, vertical="top")
+        cell_t.fill = _fill(fill_hex)
+
+        ws4.row_dimensions[r].height = max(40, min(120, len(text) // 4))
+        r += 1
+
+    ws4.column_dimensions["A"].width = 18
+    ws4.column_dimensions["B"].width = 26
+    ws4.column_dimensions["C"].width = 90
+
+    wb.save(XLSX_PATH)
+    return XLSX_PATH
+
+
+# ---------------------------------------------------------------------------
+# PDF writer — reportlab (lazy import)
+# ---------------------------------------------------------------------------
+
+PDF_PATH = "LOV3_2025_Adjusted_Balance_Sheet_Leadership_Report.pdf"
+
+
+def write_pdf(bs: dict) -> str:
+    """Write the leadership-audience PDF.  reportlab is imported lazily.
+
+    Returns the output path.
+    """
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        BaseDocTemplate, Frame, KeepTogether, PageBreak, PageTemplate,
+        Paragraph, Spacer, Table, TableStyle,
+    )
+    from datetime import datetime
+    import zoneinfo
+
+    # ── Design tokens (matches comp_report_pdf.py)
+    BLACK    = rl_colors.HexColor("#111111")
+    INK      = rl_colors.HexColor("#1a1a1a")
+    GOLD     = rl_colors.HexColor("#B8956A")
+    BONE     = rl_colors.HexColor("#6a6a6a")
+    CREAM    = rl_colors.HexColor("#f9f6f0")
+    RULE     = rl_colors.HexColor("#e5e5e5")
+    AMBER    = rl_colors.HexColor("#D4A24C")
+    RED      = rl_colors.HexColor("#C97064")
+    GREEN    = rl_colors.HexColor("#7FB069")
+    BLUE     = rl_colors.HexColor("#5A8CBF")
+
+    _ss = getSampleStyleSheet()
+
+    STYLE_H1 = ParagraphStyle(
+        "h1", parent=_ss["Heading1"], fontSize=22, leading=28,
+        textColor=BLACK, spaceAfter=8, fontName="Helvetica-Bold",
+    )
+    STYLE_H2 = ParagraphStyle(
+        "h2", parent=_ss["Heading2"], fontSize=13, leading=16,
+        textColor=BLACK, spaceBefore=14, spaceAfter=6, fontName="Helvetica-Bold",
+    )
+    STYLE_H3 = ParagraphStyle(
+        "h3", parent=_ss["Heading3"], fontSize=11, leading=14,
+        textColor=BLACK, spaceBefore=8, spaceAfter=4, fontName="Helvetica-Bold",
+    )
+    STYLE_EYEBROW = ParagraphStyle(
+        "eyebrow", parent=_ss["BodyText"], fontSize=8, leading=10,
+        textColor=GOLD, fontName="Helvetica-Bold", spaceAfter=2,
+    )
+    STYLE_BODY = ParagraphStyle(
+        "body", parent=_ss["BodyText"], fontSize=9.5, leading=13,
+        textColor=INK, spaceAfter=5,
+    )
+    STYLE_SMALL = ParagraphStyle(
+        "small", parent=_ss["BodyText"], fontSize=8, leading=10, textColor=BONE,
+    )
+    STYLE_LEAD = ParagraphStyle(
+        "lead", parent=_ss["BodyText"], fontSize=10.5, leading=14,
+        textColor=INK, spaceAfter=8, fontName="Helvetica",
+    )
+    STYLE_NOTE = ParagraphStyle(
+        "note", parent=_ss["BodyText"], fontSize=8.5, leading=11,
+        textColor=BONE, spaceAfter=4, leftIndent=12,
+    )
+    STYLE_CENTER = ParagraphStyle(
+        "center", parent=STYLE_BODY, alignment=TA_CENTER,
+    )
+
+    TABLE_HDR = TableStyle([
+        ("FONTNAME",    (0, 0), (-1,  0), "Helvetica-Bold"),
+        ("FONTSIZE",    (0, 0), (-1, -1), 8.5),
+        ("BACKGROUND",  (0, 0), (-1,  0), BLACK),
+        ("TEXTCOLOR",   (0, 0), (-1,  0), rl_colors.white),
+        ("ALIGN",       (1, 0), (-1, -1), "RIGHT"),
+        ("ALIGN",       (0, 0), (0,  -1), "LEFT"),
+        ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
+        ("BOTTOMPADDING", (0, 0), (-1,  0), 5),
+        ("TOPPADDING",    (0, 0), (-1,  0), 5),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 3),
+        ("TOPPADDING",    (0, 1), (-1, -1), 3),
+        ("LINEBELOW",   (0, 0), (-1, 0), 1, BLACK),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, CREAM]),
+    ])
+
+    def _money(v):
+        if v is None:
+            return "—"
+        sign = "(" if v < 0 else ""
+        end  = ")" if v < 0 else ""
+        return f"{sign}${abs(v):,.0f}{end}"
+
+    def _pf(v):
+        return f"${v:,.2f}"
+
+    # ── Document setup
+    doc = BaseDocTemplate(
+        PDF_PATH,
+        pagesize=LETTER,
+        rightMargin=0.75 * inch,
+        leftMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+    )
+
+    page_w, page_h = LETTER
+    body_w = page_w - 1.5 * inch
+
+    def _page_template(canvas_obj, doc_obj):
+        canvas_obj.saveState()
+        # Footer
+        canvas_obj.setFont("Helvetica", 7)
+        canvas_obj.setFillColor(BONE)
+        canvas_obj.drawString(
+            0.75 * inch, 0.45 * inch,
+            "LOV3 Restaurant & Lounge LLC — 2025 Adjusted Balance Sheet | CONFIDENTIAL — BAED Corporation / Sanchez Burnside",
+        )
+        canvas_obj.drawRightString(
+            page_w - 0.75 * inch, 0.45 * inch,
+            f"Page {doc_obj.page}",
+        )
+        # Top rule
+        canvas_obj.setStrokeColor(GOLD)
+        canvas_obj.setLineWidth(1.5)
+        canvas_obj.line(0.75 * inch, page_h - 0.55 * inch,
+                        page_w - 0.75 * inch, page_h - 0.55 * inch)
+        canvas_obj.restoreState()
+
+    frame = Frame(
+        0.75 * inch, 0.75 * inch,
+        body_w, page_h - 1.5 * inch,
+        id="normal",
+    )
+    doc.addPageTemplates([PageTemplate(id="main", frames=[frame], onPage=_page_template)])
+
+    story = []
+
+    # ── Helper to format a two-column table
+    def _two_col_table(left_header, right_header, rows, col_widths=None):
+        if col_widths is None:
+            col_widths = [body_w * 0.55, body_w * 0.45]
+        data = [[left_header, right_header]] + rows
+        tbl = Table(data, colWidths=col_widths)
+        tbl.setStyle(TABLE_HDR)
+        return tbl
+
+    now_ct = datetime.now(tz=zoneinfo.ZoneInfo("America/Chicago"))
+    ts = now_ct.strftime("%B %d, %Y  %I:%M %p CT")
+
+    # ==================================================================
+    # PAGE 1 — Cover
+    # ==================================================================
+    story += [
+        Spacer(1, 0.5 * inch),
+        Paragraph("LOV3 Restaurant & Lounge LLC", STYLE_EYEBROW),
+        Paragraph("2025 Adjusted Balance Sheet", STYLE_H1),
+        Paragraph("K-1 Preparation Package — Sanchez Burnside / BAED Corporation", STYLE_H2),
+        Spacer(1, 0.15 * inch),
+        Paragraph(
+            f"<b>As of:</b> December 31, 2025  &nbsp;|&nbsp; "
+            f"<b>Basis:</b> Accrual  &nbsp;|&nbsp;  "
+            f"<b>Generated:</b> {ts}",
+            STYLE_BODY,
+        ),
+        Spacer(1, 0.15 * inch),
+        Paragraph(
+            "<b>IMPORTANT:</b> This document contains estimates and placeholders. "
+            "Cells and items labeled <b>ACCOUNTANT INPUT</b> have not been confirmed and "
+            "must be resolved before this balance sheet is presented as final or filed with any return. "
+            "Refinements and uncertainties are presented explicitly in Section 5 (Open Items).",
+            ParagraphStyle("warn", parent=STYLE_BODY, textColor=RED, spaceAfter=10),
+        ),
+        Spacer(1, 0.15 * inch),
+    ]
+
+    # Cover summary KPI table
+    kpi_rows = [
+        ["Total Assets (with placeholders)",     _money(bs["total_assets"])],
+        ["Total Liabilities",                    _money(bs["total_liabilities"])],
+        ["  Taxes Payable (TX Comptroller)",     _money(bs["liabilities"]["taxes_payable"])],
+        ["Total Partners' Capital",              _money(bs["total_equity"])],
+        ["Unreconciled Difference (plug)",       _money(bs["unreconciled_difference"])],
+        ["Beginning Partners' Capital (1/1/25)", _money(BEGINNING_BALANCES["partners_capital"])],
+        ["Distributions 2025 (BQ bank data)",   _money(-abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"]))],
+    ]
+    tbl = _two_col_table("Balance Sheet Line", "Amount", kpi_rows,
+                         col_widths=[body_w * 0.65, body_w * 0.35])
+    story.append(tbl)
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph(
+        "The unreconciled difference ($123,575) is a plug that forces the sheet to balance. "
+        "It will collapse to $0 when cash, net income 2025, depreciation, AP, and accrued payroll "
+        "are supplied by the accountant.",
+        STYLE_NOTE,
+    ))
+    story.append(PageBreak())
+
+    # ==================================================================
+    # PAGE 2 — Revenue Variance Summary
+    # ==================================================================
+    story += [
+        Paragraph("SECTION 1", STYLE_EYEBROW),
+        Paragraph("Revenue: Filed vs Book — Headline Variance", STYLE_H1),
+        Spacer(1, 0.1 * inch),
+        Paragraph(
+            "Toast POS net_price (net of voids) vs Texas Comptroller implied receipts (filed liability ÷ rate). "
+            "Two buckets: <b>MB</b> (Mixed Beverage — Liquor, Wine, Bottled Beer) and "
+            "<b>NON-MB</b> (Food, NA Beverage, Hookah POS, Door, uncategorized). "
+            "Numbers are business-day basis (4 AM CT cutoff). "
+            "The Comptroller uses calendar-month periods; small timing differences are expected and immaterial.",
+            STYLE_LEAD,
+        ),
+    ]
+
+    var_rows = _monthly_variance_table()
+    annual_toast_mb  = sum(r["toast_mb"]    for r in var_rows)
+    annual_toast_non = sum(r["toast_non_mb"] for r in var_rows)
+    annual_impl_mb   = sum(r["implied_mb_gr_receipts"]  for r in var_rows)
+    annual_impl_non  = sum(r["implied_su_receipts"]      for r in var_rows)
+    annual_var_mb    = round(annual_toast_mb  - annual_impl_mb,  2)
+    annual_var_non   = round(annual_toast_non - annual_impl_non, 2)
+
+    story.append(Paragraph("Annual Totals", STYLE_H2))
+    annual_summary = [
+        ["Bucket", "Toast Book ($)", "Filed Implied Receipts ($)", "Variance (Book − Filed) ($)"],
+        ["MB (alcohol)", _pf(annual_toast_mb),  _pf(annual_impl_mb),  _pf(annual_var_mb)],
+        ["NON-MB",       _pf(annual_toast_non), _pf(annual_impl_non), _pf(annual_var_non)],
+        ["TOTAL",
+         _pf(annual_toast_mb + annual_toast_non),
+         _pf(annual_impl_mb + annual_impl_non),
+         _pf(annual_var_mb + annual_var_non)],
+    ]
+    tbl_annual = Table(annual_summary,
+                       colWidths=[body_w * 0.28, body_w * 0.24, body_w * 0.24, body_w * 0.24])
+    tbl_annual.setStyle(TABLE_HDR)
+    story.append(tbl_annual)
+    story.append(Spacer(1, 0.12 * inch))
+
+    story.append(Paragraph("Monthly Detail", STYLE_H2))
+    monthly_hdr = ["Month", "Toast MB ($)", "MB Implied ($)", "Var MB ($)",
+                   "Toast NON-MB ($)", "NON-MB Implied ($)", "Var NON-MB ($)"]
+    monthly_data = [monthly_hdr] + [
+        [r["label"],
+         _pf(r["toast_mb"]), _pf(r["implied_mb_gr_receipts"]), _pf(r["var_mb"]),
+         _pf(r["toast_non_mb"]), _pf(r["implied_su_receipts"]), _pf(r["var_non_mb"])]
+        for r in var_rows
+    ]
+    col_w = body_w / 7
+    tbl_monthly = Table(monthly_data, colWidths=[col_w] * 7)
+    tbl_monthly.setStyle(TABLE_HDR)
+    story.append(tbl_monthly)
+    story.append(Spacer(1, 0.1 * inch))
+
+    story.append(Paragraph(
+        "<b>Key drivers of variance (where quantified):</b>",
+        STYLE_BODY,
+    ))
+    drivers_text = [
+        ("Voided items",
+         "$176,422.30 in 2025 voided POS items (MB $159,144 + NON-MB $17,278). "
+         "Both the Toast BQ snapshot and the Comptroller receipts base exclude voids — no net variance from this."),
+        ("Quarterly S&U distribution",
+         "S&U was filed quarterly for H1 2025 (Q1 = period 251, Q2 = period 252). "
+         "Monthly variances in Jan–Jun reflect equal distribution of the quarterly filing across 3 months. "
+         "The annual total is precise."),
+        ("MB step change",
+         "MB GR filings show ~$1.9–4.1K/mo Jan–Jun 2025 vs $17–23K/mo Jul–Dec 2025. "
+         "Amended/struck returns in periods 2504–2505 coincide with the step change. "
+         "Accountant must quantify whether early-2025 MB receipts were under-filed."),
+        ("Service charges",
+         "Mandatory 20% service charge is LOV3 revenue (IRS Rev. Rul. 2012-18, not gratuity). "
+         "Included in net_price and likely included in Comptroller receipts. No adjustment needed."),
+        ("Hookah (Predictive Insights)",
+         "Monthly bank deposits from Predictive Insights LLC (hookah operator, May 2025+) "
+         "do not appear in Toast net_price. Accountant must confirm Comptroller treatment."),
+        ("Timing",
+         "4 AM CT business-day cutoff shifts late-night sessions. Near-month-end variances < 1% of "
+         "monthly revenue are immaterial."),
+    ]
+    for title, detail in drivers_text:
+        story.append(Paragraph(f"<b>{title}:</b> {detail}", STYLE_BODY))
+
+    story.append(PageBreak())
+
+    # ==================================================================
+    # PAGE 3 — Three Taxes Explained
+    # ==================================================================
+    story += [
+        Paragraph("SECTION 2", STYLE_EYEBROW),
+        Paragraph("The Three Texas Comptroller Tax Accounts", STYLE_H1),
+        Spacer(1, 0.1 * inch),
+    ]
+
+    tax_explanations = [
+        (
+            "1. Mixed Beverage Gross Receipts Tax (MB GR) — 6.7%",
+            f"LOV3's own operating expense on alcohol sales. The Comptroller charges LOV3 6.7% of "
+            f"gross MB receipts (Liquor, Wine, Bottled Beer). This is a cost-of-doing-business tax, "
+            f"like a franchise fee on alcohol revenue. It is NOT collected from customers. "
+            f"Book as Taxes & Licenses in OPEX — never net from revenue. "
+            f"2025 annual liability: {_pf(sum(period_liabilities(MB_GR).values()))}.",
+        ),
+        (
+            "2. Mixed Beverage Sales Tax (MB Sales) — 8.25%",
+            f"Collected from customers on every MB sale and remitted to the Comptroller. "
+            f"This is a pass-through liability — it never touches P&L as revenue or expense. "
+            f"At any month-end, amounts collected but not yet remitted sit on the balance sheet "
+            f"as a current liability (Sales Tax Payable). "
+            f"2025 annual liability: {_pf(sum(period_liabilities(MB_SALES).values()))}.",
+        ),
+        (
+            "3. Sales & Use Tax (S&U) — 8.25%",
+            f"Collected from customers on non-MB taxable sales (Food, NA Beverage, Door cover charges, etc.). "
+            f"Same pass-through structure as MB Sales Tax. "
+            f"Houston combined state + local rate = 8.25%. Filed quarterly for H1 2025 "
+            f"(period 251 = Q1 Jan–Mar; period 252 = Q2 Apr–Jun), then monthly from Jul 2025. "
+            f"Texas Tax Code § 151.423 grants LOV3 a 0.5% timely-filing discount when the return "
+            f"and payment are filed on time — this discount does NOT apply to MB taxes. "
+            f"2025 annual liability: {_pf(sum(period_liabilities(SALES_USE, year=2025).values()))}.",
+        ),
+    ]
+    for title, body in tax_explanations:
+        story.append(Paragraph(title, STYLE_H2))
+        story.append(Paragraph(body, STYLE_BODY))
+
+    # Year-end taxes payable breakdown
+    tp_mbgr  = taxes_payable_at_yearend(MB_GR,    discount_eligible=False)
+    tp_mbs   = taxes_payable_at_yearend(MB_SALES,  discount_eligible=False)
+    tp_su    = taxes_payable_at_yearend(SALES_USE, discount_eligible=True)
+
+    story.append(Paragraph("Year-End Taxes Payable (12/31/2025)", STYLE_H2))
+    story.append(Paragraph(
+        "These are tax liabilities that accrued in 2025 (periods 2511 = Nov 2025 and "
+        "2512 = Dec 2025) but whose payments were filed in January/February 2026. "
+        "Under accrual accounting, they are a current liability at 12/31/2025.",
+        STYLE_BODY,
+    ))
+    tp_table = [
+        ["Tax Account",         "Periods Outstanding", "Amount Payable"],
+        ["MB Gross Receipts",   "Nov 2025 (2511), Dec 2025 (2512)", _pf(tp_mbgr)],
+        ["MB Sales Tax",        "Nov 2025 (2511), Dec 2025 (2512)", _pf(tp_mbs)],
+        ["Sales & Use Tax",     "Nov 2025 (2511), Dec 2025 (2512)", _pf(tp_su)],
+        ["TOTAL TAXES PAYABLE", "",                                 _pf(tp_mbgr + tp_mbs + tp_su)],
+    ]
+    tbl_tp = Table(tp_table, colWidths=[body_w * 0.38, body_w * 0.38, body_w * 0.24])
+    tbl_tp.setStyle(TABLE_HDR)
+    story.append(tbl_tp)
+    story.append(Spacer(1, 0.1 * inch))
+    story.append(Paragraph(
+        f"Note: S&U period 2510 (Oct 2025) recognized a $29.50 timely-filer discount "
+        f"(0.5% of {_pf(period_liabilities(SALES_USE).get('2510', 0.0))} liability per Tax Code § 151.423). "
+        f"This $29.50 shortfall is settled — not counted in taxes payable.",
+        STYLE_NOTE,
+    ))
+
+    story.append(PageBreak())
+
+    # ==================================================================
+    # PAGE 4 — Adjustments Summary
+    # ==================================================================
+    story += [
+        Paragraph("SECTION 3", STYLE_EYEBROW),
+        Paragraph("Adjustments Summary", STYLE_H1),
+        Spacer(1, 0.1 * inch),
+        Paragraph(
+            "Recommended accounting entries to bring the 2025 books in line with this analysis. "
+            "These are advisory — the CPA of record (Sanchez Burnside / BAED Corporation) should "
+            "review and approve before any entries are posted.",
+            STYLE_LEAD,
+        ),
+    ]
+
+    adj_rows = [
+        ["#", "Debit Account", "Credit Account", "Approximate Amount", "Description"],
+        ["1", "Taxes & Licenses (OPEX)",  "MB Gross Receipts Tax Payable",
+         _pf(sum(period_liabilities(MB_GR).values())),
+         "Accrue 2025 MB GR expense if not already in P&L"],
+        ["2", "MB Sales Tax Payable",      "Cash / Bank",
+         "As remitted",
+         "Reclassify MB Sales Tax from revenue to liability (pass-through)"],
+        ["3", "Sales & Use Tax Payable",   "Cash / Bank",
+         "As remitted",
+         "Reclassify S&U Tax from revenue to liability (pass-through)"],
+        ["4", "Prior OPEX / Legal Expense", "Cash / Reversal",
+         _pf(59175.0),
+         "Reverse $59,175 legal hold expense if booked (hold was reversed 2025-08-29, net = $0)"],
+        ["5", "Cash / Receivable",          "Hookah Revenue",
+         "TBD",
+         "Record Predictive Insights LLC monthly hookah deposits as additive revenue (not in Toast POS)"],
+        ["6", "Owner Distributions",        "Cash / Partners' Capital",
+         _pf(abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])),
+         "Confirm BQ bank-category total ($225,496) reconciles to K-1 distributions before filing"],
+    ]
+    tbl_adj = Table(adj_rows,
+                    colWidths=[body_w * 0.04, body_w * 0.20, body_w * 0.20,
+                               body_w * 0.16, body_w * 0.40])
+    tbl_adj.setStyle(TABLE_HDR)
+    story.append(tbl_adj)
+    story.append(PageBreak())
+
+    # ==================================================================
+    # PAGE 5 — Open Items for BAED (ACCOUNTANT INPUT list)
+    # ==================================================================
+    story += [
+        Paragraph("SECTION 4", STYLE_EYEBROW),
+        Paragraph("Open Items for BAED Corporation / Sanchez Burnside", STYLE_H1),
+        Spacer(1, 0.1 * inch),
+        Paragraph(
+            "The following items are placeholders in this balance sheet. "
+            "All must be resolved before the 2025 balance sheet is final and the 1065 / K-1s are filed.",
+            STYLE_LEAD,
+        ),
+    ]
+
+    open_items = [
+        ["Item", "Placeholder Used", "Data Source / Action Required"],
+        ["Cash at 12/31/2025",
+         "$0",
+         "BQ shows -$473.97 (intraday low after $71K payroll wire). "
+         "Use Dec-2025 BofA statement closing balance. Request from BofA online portal."],
+        ["2025 Depreciation",
+         "$0 (no add'l dep.)",
+         "Fixed-asset schedule required. 2024 accum. dep. = $9,278 carried forward."],
+        ["Net Income 2025",
+         "$0",
+         "Reference LOV3_HTX_Financial_Statements_SBA.xlsx (adjusted P&L). "
+         "Insert 2025 accrual-basis book income before filing K-1s."],
+        ["Accounts Payable",
+         "$0",
+         "No AP sub-ledger available. Confirm outstanding vendor invoices at 12/31/2025."],
+        ["Accrued Payroll",
+         "$0",
+         "No payroll accrual data. Confirm pay-period cutoff vs 12/31/2025."],
+        ["Capital Contributions 2025",
+         "$0",
+         "No contribution records. Confirm with bank records and partner agreements."],
+        ["Accounts Receivable 2025",
+         "$373,592 (2024 balance)",
+         "Large A/R for a card restaurant. Confirm treatment: collect, write off, or reclassify."],
+        ["Inventory 2025",
+         "$32,191 (2024 balance)",
+         "Physical count at 12/31/2025 required."],
+        ["Partner Ownership %",
+         "Maurice 15% (confirmed)",
+         "Eddiele B Jasper and Derwin James % unknown. "
+         "Confirm from LLC operating agreement before K-1 income allocation."],
+        ["Owner Distributions — reconciliation",
+         "$225,496 (BQ bank)",
+         "Prior SBA P&L showed $231,907 (delta ~$6,411). "
+         "Reconcile to K-1 distribution amount; check Credit Card Payments / Admin & Office buckets."],
+    ]
+    tbl_open = Table(open_items,
+                     colWidths=[body_w * 0.25, body_w * 0.20, body_w * 0.55])
+    tbl_open.setStyle(TABLE_HDR)
+    story.append(tbl_open)
+
+    story.append(PageBreak())
+
+    # ==================================================================
+    # PAGE 6 — Flags (from build_balance_sheet)
+    # ==================================================================
+    story += [
+        Paragraph("SECTION 5", STYLE_EYEBROW),
+        Paragraph("Balance Sheet Flags & Assumptions", STYLE_H1),
+        Spacer(1, 0.1 * inch),
+        Paragraph(
+            "These flags are generated directly from the balance sheet computation. "
+            "Items marked ACCOUNTANT INPUT are unresolved placeholders. "
+            "Items marked NOTE are informational audit trails.",
+            STYLE_LEAD,
+        ),
+    ]
+
+    for i, flag_text in enumerate(bs["flags"], 1):
+        if flag_text.startswith("ACCOUNTANT INPUT"):
+            color = AMBER
+            prefix = "ACCOUNTANT INPUT"
+        elif flag_text.startswith("WARNING"):
+            color = RED
+            prefix = "WARNING"
+        else:
+            color = BLUE
+            prefix = "NOTE"
+
+        story.append(Paragraph(
+            f'<font color="{color.hexval()}">[{i}] <b>{prefix}:</b></font> {flag_text}',
+            STYLE_BODY,
+        ))
+
+    story.append(Spacer(1, 0.3 * inch))
+    story.append(Paragraph(
+        f"This report was generated from adjusted_balance_sheet_2025.py on {ts}. "
+        "Source data: Texas Comptroller WebFile PDFs (transcribed 2026-10-10), "
+        "BigQuery toast_raw dataset (net of voids, business-day basis), "
+        "and 2024 Schedule L (Form 1065).",
+        STYLE_SMALL,
+    ))
+
+    doc.build(story)
+    return PDF_PATH
+
+
+# ---------------------------------------------------------------------------
+# main() — build balance sheet, write both files, print summary
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    """Build balance sheet + write Excel workbook and leadership PDF."""
+    import os
+
+    print("=" * 68)
+    print("LOV3 HTX — 2025 Adjusted Balance Sheet (K-1 Prep)")
+    print("=" * 68)
+
     bs = build_balance_sheet()
-    # Print a compact version (suppress flags for readability; print count instead)
-    compact = {k: v for k, v in bs.items() if k != "flags"}
-    compact["flag_count"] = len(bs["flags"])
-    print(json.dumps(compact, indent=2))
-    print(f"\n--- {len(bs['flags'])} flags ---")
-    for i, f in enumerate(bs["flags"], 1):
-        print(f"  [{i}] {f}")
+
+    # ── Key totals
+    print(f"\nKey Totals (accrual basis, 12/31/2025)")
+    print(f"  Total Assets              : {bs['total_assets']:>14,.2f}")
+    print(f"  Total Liabilities         : {bs['total_liabilities']:>14,.2f}")
+    print(f"    Taxes Payable (TX)      : {bs['liabilities']['taxes_payable']:>14,.2f}")
+    print(f"  Total Equity              : {bs['total_equity']:>14,.2f}")
+    print(f"  Unreconciled Difference   : {bs['unreconciled_difference']:>14,.2f}  ← resolve ACCOUNTANT INPUTs")
+    print(f"  Balance check (A = L+E)   : "
+          f"{'OK' if abs(bs['total_assets'] - bs['total_liabilities'] - bs['total_equity']) < 0.01 else 'FAIL'}")
+    print(f"  Flags                     : {len(bs['flags'])} items")
+
+    # ── Tax payable breakdown
+    tp_mbgr = taxes_payable_at_yearend(MB_GR,    discount_eligible=False)
+    tp_mbs  = taxes_payable_at_yearend(MB_SALES,  discount_eligible=False)
+    tp_su   = taxes_payable_at_yearend(SALES_USE, discount_eligible=True)
+    print(f"\nTaxes Payable at 12/31/2025")
+    print(f"  MB Gross Receipts (6.7%)  : {tp_mbgr:>14,.2f}")
+    print(f"  MB Sales Tax (8.25%)      : {tp_mbs:>14,.2f}")
+    print(f"  Sales & Use Tax (8.25%)   : {tp_su:>14,.2f}")
+    print(f"  TOTAL                     : {tp_mbgr + tp_mbs + tp_su:>14,.2f}")
+
+    # ── Annual variance quick-check
+    var_rows = _monthly_variance_table()
+    annual_toast_mb  = round(sum(r["toast_mb"]    for r in var_rows), 2)
+    annual_toast_non = round(sum(r["toast_non_mb"] for r in var_rows), 2)
+    annual_impl_mb   = round(sum(r["implied_mb_gr_receipts"]  for r in var_rows), 2)
+    annual_impl_non  = round(sum(r["implied_su_receipts"]      for r in var_rows), 2)
+    annual_var_mb    = round(annual_toast_mb  - annual_impl_mb,  2)
+    annual_var_non   = round(annual_toast_non - annual_impl_non, 2)
+    print(f"\nRevenue Variance (Toast Book vs Filed Implied Receipts)")
+    print(f"  MB  — Toast: {annual_toast_mb:>14,.2f}  |  Filed Implied: {annual_impl_mb:>14,.2f}  |  Var: {annual_var_mb:>+14,.2f}")
+    print(f"  NON — Toast: {annual_toast_non:>14,.2f}  |  Filed Implied: {annual_impl_non:>14,.2f}  |  Var: {annual_var_non:>+14,.2f}")
+
+    # ── Write Excel
+    print(f"\nWriting Excel workbook ...")
+    xlsx_path = write_excel(bs)
+    xlsx_size = os.path.getsize(xlsx_path)
+    print(f"  {xlsx_path}  ({xlsx_size:,} bytes)")
+
+    # ── Write PDF
+    print(f"\nWriting leadership PDF ...")
+    pdf_path = write_pdf(bs)
+    pdf_size = os.path.getsize(pdf_path)
+    print(f"  {pdf_path}  ({pdf_size:,} bytes)")
+
+    print(f"\nDone. Open files with:")
+    print(f"  open \"{xlsx_path}\"")
+    print(f"  open \"{pdf_path}\"")
+    print("=" * 68)
+
+
+if __name__ == "__main__":
+    main()
 
