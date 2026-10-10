@@ -200,6 +200,132 @@ def implied_receipts(liabs: dict, rate: float) -> dict:
     return {p: round(v / rate, 2) for p, v in liabs.items()}
 
 
+def match_legal_order(
+    amount: float = 59175.00,
+    window: tuple = ("2025-07-01", "2025-09-30"),
+    tolerance: float = 0.01,
+    rows: list | None = None,
+) -> dict:
+    """Search WebFile payment rows for a single payment or same-day combination
+    (across MB_GR, MB_SALES, SALES_USE) equal to `amount` within `window`.
+
+    Parameters
+    ----------
+    amount : float
+        Dollar amount to search for (default $59,175.00).
+    window : tuple[str, str]
+        Inclusive ISO date window ``("YYYY-MM-DD", "YYYY-MM-DD")``.
+    tolerance : float
+        Maximum absolute difference allowed for a match (default 0.01).
+    rows : list | None
+        Override the combined WebFile rows used for matching.  When None the
+        three module-level constants (MB_GR, MB_SALES, SALES_USE) are combined.
+        Each row must be a 7-tuple: (txn_type, filed_date, ref, period,
+        period_end, amount, struck).
+
+    Returns
+    -------
+    dict
+        ``{"matched": bool, "matches": list, "classification": str}``
+
+        *matches* — each entry is a list of payment rows (as dicts with an
+        added ``tax_type`` key) whose combined amount equals ``amount`` within
+        ``tolerance``.  An entry with one element is a single-payment match;
+        an entry with two or more elements is a same-day combination.
+
+        *classification* — one of three strings depending on outcome:
+        - matched → "tax remittance — matches WebFile payment(s); reclassify
+          from legal order to tax payment"
+        - not matched + reversal in BQ_RESULTS → "temporary hold, fully
+          reversed 2025-08-29, net zero — no balance sheet impact; remove from
+          OPEX if booked as expense"
+        - not matched + no reversal → "TX Comptroller Security Bond
+          (unconfirmed) — Other Assets, flag for accountant"
+    """
+    from itertools import combinations as _combinations
+
+    window_start, window_end = window
+
+    # Build the candidate pool from the three constants (or injected rows).
+    if rows is None:
+        tagged: list[tuple] = (
+            [(r, "MB_GR") for r in MB_GR]
+            + [(r, "MB_SALES") for r in MB_SALES]
+            + [(r, "SALES_USE") for r in SALES_USE]
+        )
+    else:
+        # Injected rows: tag with a generic label.
+        tagged = [(r, "injected") for r in rows]
+
+    # Filter to qualifying payment rows inside the window.
+    candidates: list[dict] = []
+    for row, tax_type in tagged:
+        txn_type, filed_date, ref, period, period_end, row_amount, struck = row
+        if (
+            "payment" in txn_type.lower()
+            and not struck
+            and window_start <= filed_date <= window_end
+        ):
+            candidates.append({
+                "txn_type": txn_type,
+                "filed_date": filed_date,
+                "ref": ref,
+                "period": period,
+                "period_end": period_end,
+                "amount": row_amount,
+                "struck": struck,
+                "tax_type": tax_type,
+            })
+
+    # Group candidates by filed_date for same-day combination checks.
+    by_date: dict[str, list[dict]] = defaultdict(list)
+    for c in candidates:
+        by_date[c["filed_date"]].append(c)
+
+    matches: list[list[dict]] = []
+
+    for date_str, day_rows in sorted(by_date.items()):
+        # Check single payments.
+        for row in day_rows:
+            if abs(row["amount"] - amount) <= tolerance:
+                matches.append([row])
+
+        # Check all pairwise and full-day-total combinations (avoid re-checking
+        # single rows already caught above).
+        for r in range(2, len(day_rows) + 1):
+            for combo in _combinations(day_rows, r):
+                combo_sum = sum(c["amount"] for c in combo)
+                if abs(combo_sum - amount) <= tolerance:
+                    # Avoid adding a duplicate if it exactly overlaps a single match.
+                    matches.append(list(combo))
+
+    if matches:
+        classification = (
+            "tax remittance — matches WebFile payment(s); "
+            "reclassify from legal order to tax payment"
+        )
+        return {"matched": True, "matches": matches, "classification": classification}
+
+    # Not matched — check for the reversal row in BQ_RESULTS.
+    reversal_present = any(
+        row_amount > 0 and abs(row_amount - amount) <= tolerance
+        for _, _, row_amount in BQ_RESULTS.get("legal_order_rows", [])
+    )
+
+    if reversal_present:
+        classification = (
+            "temporary hold, fully reversed 2025-08-29, net zero — "
+            "no balance sheet impact; remove from OPEX if booked as expense"
+        )
+    else:
+        classification = (
+            "TX Comptroller Security Bond (unconfirmed) — "
+            "Other Assets, flag for accountant"
+        )
+
+    return {"matched": False, "matches": [], "classification": classification}
+
+
 # ---------------------------------------------------------------
 # Reproducibility — SQL used to generate the snapshots below.
 # Project: toast-analytics-444116  Dataset: toast_raw

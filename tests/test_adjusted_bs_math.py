@@ -1,7 +1,7 @@
 # tests/test_adjusted_bs_math.py
 from adjusted_balance_sheet_2025 import (
     period_liabilities, taxes_payable_at_yearend, penalties_and_interest,
-    implied_receipts, MB_GR, MB_SALES, SALES_USE,
+    implied_receipts, match_legal_order, MB_GR, MB_SALES, SALES_USE, BQ_RESULTS,
 )
 
 
@@ -38,3 +38,37 @@ def test_implied_receipts_divides_by_rate():
 def test_sales_use_excludes_2024_q4_from_2025():
     liabs = period_liabilities(SALES_USE, year=2025)
     assert "244" not in liabs and "251" in liabs
+
+
+# ---------------------------------------------------------------------------
+# match_legal_order tests
+# ---------------------------------------------------------------------------
+
+def test_match_legal_order_real_data_not_matched_temporary_hold():
+    """With real WebFile constants, no payment matches $59,175 — classified as
+    temporary hold fully reversed."""
+    result = match_legal_order()
+    assert result["matched"] is False
+    assert "temporary hold" in result["classification"].lower()
+    assert "fully reversed" in result["classification"].lower()
+    assert "net zero" in result["classification"].lower()
+
+
+def test_match_legal_order_synthetic_single_payment_found():
+    """Injecting a single payment row of exactly $59,175 on a date inside the
+    window should return matched=True."""
+    synthetic_row = ("payment", "2025-08-25", "SYNTH001", "2508", "2025-08-31", 59175.00, False)
+    result = match_legal_order(rows=[synthetic_row])
+    assert result["matched"] is True
+    assert len(result["matches"]) >= 1
+    assert "tax remittance" in result["classification"].lower()
+
+
+def test_match_legal_order_synthetic_two_payment_combo():
+    """Two payments on the same date whose sum equals $59,175 should be matched."""
+    row_a = ("payment", "2025-08-25", "SYNTH002A", "2508", "2025-08-31", 30000.00, False)
+    row_b = ("payment", "2025-08-25", "SYNTH002B", "2508", "2025-08-31", 29175.00, False)
+    result = match_legal_order(rows=[row_a, row_b])
+    assert result["matched"] is True
+    assert any(len(m) >= 2 for m in result["matches"])
+    assert "tax remittance" in result["classification"].lower()
