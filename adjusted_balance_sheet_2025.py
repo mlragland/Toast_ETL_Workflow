@@ -177,13 +177,35 @@ def period_payments(rows: list, year: int = 2025) -> dict:
 
 
 def taxes_payable_at_yearend(rows: list, asof: str = "2025-12-31") -> float:
-    """Liabilities for periods ending <= asof with no full payment on or before asof."""
-    liabs = period_liabilities(rows, year=int(asof[:4]))
+    """Return the net unpaid tax liability for all periods whose period_end <= asof,
+    after crediting payments made on or before asof.
+
+    For each in-scope period the remaining balance is:
+        max(0, liability - payments_made_by_asof)
+
+    This correctly handles partial prepayments (prior implementation returned
+    the full liability when any payment remained outstanding).
+
+    Generalisation: periods are included when period_end <= asof (not restricted
+    to a single calendar year), so the function is correct for mid-year asof dates.
+    Payments with filed_date <= asof are credited regardless of which year's
+    period they belong to.
+    """
+    # Collect liabilities for every period whose period_end falls on or before asof.
+    liabs: defaultdict = defaultdict(float)
+    for txn, filed, ref, period, pend, amount, struck in rows:
+        if txn in ("return", "amended") and not struck and pend <= asof:
+            liabs[period] += amount
+
+    # Sum payments filed on or before asof, per period.
     paid_by_asof: defaultdict = defaultdict(float)
     for txn, filed, ref, period, pend, amount, struck in rows:
         if txn == "payment" and not struck and filed <= asof:
             paid_by_asof[period] += amount
-    return round(sum(v for p, v in liabs.items() if paid_by_asof[p] < v - 0.01), 2)
+
+    # Remaining balance per period, floored at 0.
+    total = sum(max(0.0, v - paid_by_asof[p]) for p, v in liabs.items())
+    return round(total, 2)
 
 
 def penalties_and_interest(rows: list, year: int = 2025) -> dict:
@@ -577,4 +599,249 @@ BQ_RESULTS = {
         "ACCOUNTANT INPUT: reconcile to K-1 distribution amount before filing."
     ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Balance Sheet Builder
+# ---------------------------------------------------------------------------
+
+def build_balance_sheet(asof: str = "2025-12-31") -> dict:
+    """Build an accrual-basis balance sheet as of `asof` (default 2025-12-31).
+
+    All lines that require external confirmation are marked ACCOUNTANT INPUT and
+    carry a human-readable flag in bs["flags"].  Any resulting gap between
+    total_assets and total_liabilities + total_equity is surfaced in
+    bs["unreconciled_difference"] — never hidden.
+
+    Returns
+    -------
+    dict with keys:
+        as_of, basis, assets, liabilities, equity,
+        total_assets, total_liabilities, total_equity,
+        unreconciled_difference, flags
+    """
+    flags: list[str] = []
+
+    # ------------------------------------------------------------------
+    # ASSETS
+    # ------------------------------------------------------------------
+
+    # Cash — BQ stmt-14.csv shows an intraday low on 12/31 after payroll wire;
+    # value is unreliable.  Accountant must supply Dec-2025 BofA closing balance.
+    cash = 0.0
+    flags.append(
+        "ACCOUNTANT INPUT — cash: BQ shows -$473.97 (intraday low after $71K "
+        "payroll wire on 12/31/2025); use Dec-2025 BofA statement closing balance. "
+        f"Placeholder: $0."
+    )
+
+    # Accounts Receivable — carrying 2024 Schedule L ending balance forward.
+    # Large for a cash-and-card restaurant; likely Toast settlement receivable
+    # or related-party balance.  Accountant must confirm 2025 treatment.
+    accounts_receivable = BEGINNING_BALANCES["accounts_receivable"]  # 373,592
+    flags.append(
+        "ACCOUNTANT INPUT — accounts_receivable: carrying 2024 Schedule L ending "
+        f"balance of ${accounts_receivable:,.2f} forward. "
+        "Unusually large for a cash-and-card restaurant; likely Toast settlement "
+        "receivable or related-party balance. Confirm 2025 year-end treatment."
+    )
+
+    # Inventory — carrying 2024 Schedule L ending balance forward.
+    # Physical count at 12/31/2025 required.
+    inventory = BEGINNING_BALANCES["inventory"]  # 32,191
+    flags.append(
+        "ACCOUNTANT INPUT — inventory: carrying 2024 Schedule L ending balance of "
+        f"${inventory:,.2f} forward. Confirm with 12/31/2025 physical count."
+    )
+
+    # Fixed Assets — 2024 Schedule L gross amount is definitive.
+    # Accumulated Depreciation: 2024 ending = $9,278; 2025 depreciation expense is
+    # required from the fixed-asset schedule to compute the 12/31/2025 balance.
+    gross_fixed_assets = BEGINNING_BALANCES["depreciable_assets"]  # 80,900
+    accum_dep_prior = BEGINNING_BALANCES["accumulated_depreciation"]  # 9,278
+    depreciation_2025 = 0.0  # ACCOUNTANT INPUT
+    accumulated_depreciation = accum_dep_prior + depreciation_2025
+    net_fixed_assets = gross_fixed_assets - accumulated_depreciation
+    flags.append(
+        "ACCOUNTANT INPUT — depreciation_2025: 2025 depreciation expense required "
+        "from fixed-asset schedule. Placeholder $0 used; accumulated depreciation "
+        f"carried at 2024 ending balance of ${accum_dep_prior:,.2f}."
+    )
+
+    # Legal Order / Bond — $59,175 debit on 2025-08-25 was fully reversed
+    # 2025-08-29 (net = $0).  No balance sheet asset or liability is created.
+    # Finding: Task 3 confirmed via match_legal_order() — classification
+    # "temporary hold, fully reversed 2025-08-29, net zero — no balance sheet impact".
+    flags.append(
+        "NOTE — legal order $59,175: debit 2025-08-25 fully reversed 2025-08-29 "
+        "(net = $0). No bond asset or liability on this balance sheet. "
+        "Remove from OPEX if previously booked as an expense."
+    )
+
+    assets = {
+        "cash":                    round(cash, 2),
+        "accounts_receivable":     round(accounts_receivable, 2),
+        "inventory":               round(inventory, 2),
+        "gross_fixed_assets":      round(gross_fixed_assets, 2),
+        "accumulated_depreciation": round(accumulated_depreciation, 2),
+        "net_fixed_assets":        round(net_fixed_assets, 2),
+    }
+    total_assets = round(
+        assets["cash"]
+        + assets["accounts_receivable"]
+        + assets["inventory"]
+        + assets["net_fixed_assets"],
+        2,
+    )
+
+    # ------------------------------------------------------------------
+    # LIABILITIES
+    # ------------------------------------------------------------------
+
+    # Taxes Payable — sum of unpaid period-end liabilities across all three
+    # Texas Comptroller tax accounts (MB GR, MB Sales, Sales & Use).
+    # Periods 2511 and 2512 had payments filed in Jan/Feb 2026 (after 12/31/2025),
+    # so those balances remain outstanding at year-end.
+    taxes_payable = round(
+        sum(taxes_payable_at_yearend(r, asof=asof) for r in (MB_GR, MB_SALES, SALES_USE)),
+        2,
+    )
+
+    # Accounts Payable — no AP sub-ledger available; placeholder 0.
+    accounts_payable = 0.0
+    flags.append(
+        "ACCOUNTANT INPUT — accounts_payable: no AP sub-ledger available. "
+        "Placeholder $0. Confirm with vendor invoices outstanding at 12/31/2025."
+    )
+
+    # Accrued Payroll — no payroll accrual data available; placeholder 0.
+    accrued_payroll = 0.0
+    flags.append(
+        "ACCOUNTANT INPUT — accrued_payroll: no payroll accrual data available. "
+        "Placeholder $0. Confirm with pay-period cutoff at 12/31/2025."
+    )
+
+    # Presentation note: 2024 Schedule L reported zero liabilities; taxes_payable
+    # here represents a change in presentation driven by accrual-basis recognition.
+    flags.append(
+        "NOTE — presentation change: 2024 Schedule L reported $0 total liabilities. "
+        "This 2025 balance sheet introduces taxes_payable under accrual-basis recognition "
+        "for periods 2511 (Nov 2025) and 2512 (Dec 2025) paid in Jan/Feb 2026."
+    )
+
+    liabilities = {
+        "taxes_payable":   round(taxes_payable, 2),
+        "accounts_payable": round(accounts_payable, 2),
+        "accrued_payroll":  round(accrued_payroll, 2),
+    }
+    total_liabilities = round(sum(liabilities.values()), 2)
+
+    # ------------------------------------------------------------------
+    # EQUITY (Partners' Capital roll-forward)
+    # ------------------------------------------------------------------
+
+    # Beginning partners' capital = 2024 Schedule L ending balance.
+    beginning_capital = BEGINNING_BALANCES["partners_capital"]  # 549,839
+
+    # 2025 contributions — no capital contribution records available; placeholder 0.
+    contributions_2025 = 0.0
+    flags.append(
+        "ACCOUNTANT INPUT — contributions_2025: no capital contribution records "
+        "available. Placeholder $0. Confirm with bank records and partner agreements."
+    )
+
+    # 2025 distributions — BQ bank category total for owner-attributable spend.
+    # BQ figure: $225,496.37 (Owner Draws/Transfers + Discretionary + Travel).
+    # Prior SBA P&L showed $231,907; delta ~$6,411.  Both figures stated here;
+    # accountant must reconcile to K-1 distribution amount before filing.
+    distributions_2025 = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
+    flags.append(
+        f"NOTE — distributions_2025: BQ bank-category total = $225,496.37. "
+        "Prior SBA P&L showed $231,907 Owner Draws (delta ~$6,411). "
+        "Possible gap: uncategorized rows ($1,740.77) or transactions miscategorized "
+        "as Credit Card Payments / Admin & Office. "
+        "ACCOUNTANT INPUT: reconcile to K-1 distribution amount before filing. "
+        "Using BQ figure ($225,496.37) as the working value."
+    )
+
+    # 2025 net income — placeholder 0; reference the adjusted P&L / SBA package.
+    # Do not invent a number here; the accrual-basis P&L holds the book figure.
+    net_income_2025 = 0.0
+    flags.append(
+        "ACCOUNTANT INPUT — net_income_2025: placeholder $0. "
+        "Reference the adjusted P&L / SBA package (LOV3_HTX_Financial_Statements_SBA.xlsx) "
+        "for the book net income figure. Insert here before filing K-1s."
+    )
+
+    # Partner ownership — Maurice Ragland 15% confirmed via 2024 K-1.
+    # Remaining 85% (Eddiele B Jasper and Derwin James) split unknown.
+    flags.append(
+        "ACCOUNTANT INPUT — partner_ownership: Maurice Ragland = 15% (from 2024 K-1). "
+        "Ownership percentages for Eddiele B Jasper and Derwin James are unknown. "
+        "Confirm from the LLC operating agreement before allocating K-1 income/loss."
+    )
+
+    ending_capital = round(
+        beginning_capital + contributions_2025 - distributions_2025 + net_income_2025,
+        2,
+    )
+
+    equity = {
+        "beginning_partners_capital": round(beginning_capital, 2),
+        "contributions_2025":         round(contributions_2025, 2),
+        "distributions_2025":         round(-distributions_2025, 2),  # negative = reduction
+        "net_income_2025":            round(net_income_2025, 2),
+        "ending_partners_capital":    round(ending_capital, 2),
+    }
+    total_equity = round(ending_capital, 2)
+
+    # ------------------------------------------------------------------
+    # TIE CHECK — any gap becomes a named unreconciled_difference plug
+    #
+    # unreconciled_difference = total_assets - total_liabilities - pre-plug equity
+    # Adding this plug to total_equity makes the sheet tie BY CONSTRUCTION.
+    # When all ACCOUNTANT INPUT placeholders are resolved this should reach $0.
+    # ------------------------------------------------------------------
+
+    pre_plug_equity = total_equity  # ending_capital before the plug
+    unreconciled_difference = round(
+        total_assets - (total_liabilities + pre_plug_equity), 2
+    )
+
+    if abs(unreconciled_difference) > 0.01:
+        flags.append(
+            f"WARNING — unreconciled_difference = ${unreconciled_difference:,.2f}. "
+            "This plug is included in total_equity to force the balance sheet to tie. "
+            "Resolve ACCOUNTANT INPUT placeholders (cash, depreciation_2025, "
+            "net_income_2025, accounts_payable, accrued_payroll) to eliminate this gap."
+        )
+
+    # Add the plug to the equity section so the sheet ties by construction.
+    equity["unreconciled_difference_plug"] = unreconciled_difference
+    total_equity = round(pre_plug_equity + unreconciled_difference, 2)
+
+    return {
+        "as_of":                   asof,
+        "basis":                   "accrual",
+        "assets":                  assets,
+        "liabilities":             liabilities,
+        "equity":                  equity,
+        "total_assets":            total_assets,
+        "total_liabilities":       total_liabilities,
+        "total_equity":            total_equity,
+        "unreconciled_difference": unreconciled_difference,
+        "flags":                   flags,
+    }
+
+
+if __name__ == "__main__":
+    import json
+    bs = build_balance_sheet()
+    # Print a compact version (suppress flags for readability; print count instead)
+    compact = {k: v for k, v in bs.items() if k != "flags"}
+    compact["flag_count"] = len(bs["flags"])
+    print(json.dumps(compact, indent=2))
+    print(f"\n--- {len(bs['flags'])} flags ---")
+    for i, f in enumerate(bs["flags"], 1):
+        print(f"  [{i}] {f}")
 

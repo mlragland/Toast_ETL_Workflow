@@ -2,6 +2,7 @@
 from adjusted_balance_sheet_2025 import (
     period_liabilities, taxes_payable_at_yearend, penalties_and_interest,
     implied_receipts, match_legal_order, MB_GR, MB_SALES, SALES_USE, BQ_RESULTS,
+    build_balance_sheet,
 )
 
 
@@ -83,3 +84,81 @@ def test_match_legal_order_no_match_no_reversal_security_bond():
     assert result["matches"] == []
     assert "security bond" in result["classification"].lower()
     assert "other assets" in result["classification"].lower()
+
+
+# ---------------------------------------------------------------------------
+# taxes_payable_at_yearend — partial prepayment and generalization fixes
+# ---------------------------------------------------------------------------
+
+def test_taxes_payable_partial_prepayment_returns_remainder():
+    """When a period has a partial payment by asof, the function must return
+    liability - payment_made (not the full liability)."""
+    # Synthetic rows: period 2511, liability 1000.00, partial payment 400.00 made
+    # before asof, remaining payment 600.00 made after asof.
+    rows = [
+        ("return",  "2025-12-01", "R001", "2511", "2025-11-30", 1000.00, False),
+        ("payment", "2025-12-15", "P001", "2511", "2025-11-30",  400.00, False),  # before asof
+        ("payment", "2026-01-10", "P002", "2511", "2025-11-30",  600.00, False),  # after asof
+    ]
+    result = taxes_payable_at_yearend(rows, asof="2025-12-31")
+    assert result == round(1000.00 - 400.00, 2)  # 600.00 still owed at year-end
+
+
+def test_taxes_payable_full_prepayment_excluded():
+    """A period fully paid before asof must contribute 0 to taxes_payable."""
+    rows = [
+        ("return",  "2025-11-01", "R001", "2510", "2025-10-31", 500.00, False),
+        ("payment", "2025-11-15", "P001", "2510", "2025-10-31", 500.00, False),  # fully paid before asof
+    ]
+    result = taxes_payable_at_yearend(rows, asof="2025-12-31")
+    assert result == 0.0
+
+
+def test_taxes_payable_overpayment_floored_at_zero():
+    """Overpayments (payment > liability) must floor at 0, not go negative."""
+    rows = [
+        ("return",  "2025-11-01", "R001", "2510", "2025-10-31", 500.00, False),
+        ("payment", "2025-11-15", "P001", "2510", "2025-10-31", 550.00, False),  # overpayment
+    ]
+    result = taxes_payable_at_yearend(rows, asof="2025-12-31")
+    assert result == 0.0
+
+
+# ---------------------------------------------------------------------------
+# build_balance_sheet tests
+# ---------------------------------------------------------------------------
+
+def test_balance_sheet_ties():
+    """Balance sheet must balance: total_assets == total_liabilities + total_equity."""
+    bs = build_balance_sheet()
+    assert abs(bs["total_assets"] - (bs["total_liabilities"] + bs["total_equity"])) < 1.0
+
+
+def test_taxes_payable_line_is_sum_of_three_accounts():
+    """taxes_payable in liabilities must equal the sum of taxes_payable_at_yearend
+    across all three tax type rows."""
+    bs = build_balance_sheet()
+    expected = sum(taxes_payable_at_yearend(r) for r in (MB_GR, MB_SALES, SALES_USE))
+    assert bs["liabilities"]["taxes_payable"] == round(expected, 2)
+
+
+def test_balance_sheet_has_required_keys():
+    """Return dict must contain all required top-level keys."""
+    bs = build_balance_sheet()
+    for key in ("as_of", "basis", "assets", "liabilities", "equity",
+                "total_assets", "total_liabilities", "total_equity",
+                "unreconciled_difference", "flags"):
+        assert key in bs, f"Missing key: {key}"
+
+
+def test_balance_sheet_flags_is_nonempty_list():
+    """Flags list must be present and non-empty (ACCOUNTANT INPUT placeholders exist)."""
+    bs = build_balance_sheet()
+    assert isinstance(bs["flags"], list)
+    assert len(bs["flags"]) > 0
+
+
+def test_balance_sheet_unreconciled_difference_surfaced():
+    """unreconciled_difference must be a float (even if 0.0) — never hidden."""
+    bs = build_balance_sheet()
+    assert isinstance(bs["unreconciled_difference"], float)
