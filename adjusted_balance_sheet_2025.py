@@ -20,7 +20,7 @@ from itertools import combinations
 # they are holding. Bump on any re-issue.
 # ---------------------------------------------------------------------------
 
-PACKAGE_VERSION = "2.4"
+PACKAGE_VERSION = "2.5"
 PACKAGE_VERSION_DATE = "2026-10-11"
 
 # ---------------------------------------------------------------------------
@@ -844,6 +844,34 @@ ACCOUNTS_PAYABLE_1231_2025 = {
 }
 ACCOUNTS_PAYABLE_1231_2025_TOTAL = round(sum(ACCOUNTS_PAYABLE_1231_2025.values()), 2)  # 69,275.37
 
+# Accounts receivable at 12/31/2025 — RESOLVED (owner-directed 2026-10-11):
+# settlement-verified revenue-in-transit, derived from Jan 2026 deposits in
+# BankTransactions_raw mapped back to December-earned revenue:
+#   toast_card_settlements_in_transit 46,406.64 — two Citizens NET SETLMT
+#     deposits 1/2/2026 (29,249.04 + 17,157.60) covering Dec 30-31 card sales.
+#     Cross-check vs Toast POS (PaymentDetails_raw, 4 AM business-day cutoff,
+#     voids excluded): Dec 30-31 credit payments 45,056.62 gross - 784.27
+#     V/MC/D fees = 44,272.35 net — ties within ~$2.1K (batch timing).
+#   predictive_insights_dec_hookah 15,000.00 — December hookah fee deposited
+#     1/2/2026 (earned by 12/31).
+#   stripe_cover_charges_in_transit 234.65 — Stripe payout 1/2/2026 covering
+#     Dec 30-31 cover charges (2-day payout lag).
+#   toast_eom_dec_settlement 114.63 — Toast deposit 1/8/2026 explicitly
+#     labeled "EOM Dec 31".
+# The Jan 5+ settlements (54,146.95 on 1/5 etc.) cover Jan 2-4 sales and are
+# NOT December receivables. POSH event payout 1/6 $790 excluded pending
+# owner confirmation of the event date.
+# REPLACES the 2024 Schedule L carry-forward of $373,592: the unsupported
+# variance of $311,836.08 is flagged to BAED for disposition (write-down
+# through 2025 book income, reclassification, or 2024 amendment).
+ACCOUNTS_RECEIVABLE_1231_2025 = {
+    "toast_card_settlements_in_transit": 46406.64,
+    "predictive_insights_dec_hookah":    15000.00,
+    "stripe_cover_charges_in_transit":     234.65,
+    "toast_eom_dec_settlement":            114.63,
+}
+ACCOUNTS_RECEIVABLE_1231_2025_TOTAL = round(sum(ACCOUNTS_RECEIVABLE_1231_2025.values()), 2)  # 61,755.92
+
 # ---------------------------------------------------------------------------
 # 2025 Service Charge tie-out (owner directives 2026-10-11: tie the service
 # charge paid through payroll to the top line, shown as a pass-through; the
@@ -925,15 +953,43 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         "balance sheet."
     )
 
-    # Accounts Receivable — carrying 2024 Schedule L ending balance forward.
-    # Large for a cash-and-card restaurant; likely Toast settlement receivable
-    # or related-party balance.  Accountant must confirm 2025 treatment.
-    accounts_receivable = BEGINNING_BALANCES["accounts_receivable"]  # 373,592
+    # Accounts Receivable — settlement-verified revenue-in-transit at 12/31.
+    accounts_receivable = ACCOUNTS_RECEIVABLE_1231_2025_TOTAL  # 61,755.92
+    ar = ACCOUNTS_RECEIVABLE_1231_2025
+    ar_variance = round(BEGINNING_BALANCES["accounts_receivable"] - accounts_receivable, 2)
     flags.append(
-        "ACCOUNTANT INPUT — accounts_receivable: carrying 2024 Schedule L ending "
-        f"balance of ${accounts_receivable:,.2f} forward. "
-        "Unusually large for a cash-and-card restaurant; likely Toast settlement "
-        "receivable or related-party balance. Confirm 2025 year-end treatment."
+        "RESOLVED — accounts_receivable: settlement-verified revenue-in-transit "
+        f"of ${accounts_receivable:,.2f} = Toast/Citizens card settlements for "
+        f"Dec 30-31 sales received 1/2/2026 ${ar['toast_card_settlements_in_transit']:,.2f} "
+        "(cross-checked to Toast POS net card receipts $44,272.35 within ~$2.1K) "
+        f"+ Predictive Insights December hookah fee ${ar['predictive_insights_dec_hookah']:,.2f} "
+        f"+ Stripe cover charges in transit ${ar['stripe_cover_charges_in_transit']:,.2f} "
+        f"+ Toast EOM Dec settlement ${ar['toast_eom_dec_settlement']:,.2f}. "
+        f"This REPLACES the 2024 Schedule L carry-forward of "
+        f"${BEGINNING_BALANCES['accounts_receivable']:,.2f}."
+    )
+    flags.append(
+        f"ACCOUNTANT DECISION — A/R carry-forward variance: ${ar_variance:,.2f} "
+        "of the 2024 Schedule L A/R balance is unsupported by 12/31/2025 "
+        "settlement data (LOV3's true receivable cycle is ~2 business days of "
+        "card sales plus the monthly hookah fee). BAED to determine disposition: "
+        "write-down through 2025 book income, reclassification (e.g., "
+        "related-party/owner advance), or amendment of the 2024 Schedule L."
+    )
+    flags.append(
+        "ACCOUNTANT DECISION — A/R disposition LEADING HYPOTHESIS: the 2025 "
+        "off-POS revenue booked additive to the top line ($309,447.56 = Stripe "
+        "cover charges $187,167.56 + Predictive Insights hookah $109,080.00 + "
+        "events $13,200.00) matches the unsupported A/R carry-forward variance "
+        "($311,836.08) within $2,388.52. If the 2024 preparer accrued expected "
+        "off-POS revenue as the 2024 Schedule L receivable, the 2025 deposits "
+        "are COLLECTIONS of that receivable (Dr cash / Cr A/R — no 2025 revenue, "
+        "no write-down, no loss). BAED: pull the 2024 A/R composition from the "
+        "prior preparer's workpapers to confirm. CONSTRAINTS if adopted: "
+        "(1) the accepted SBA P&L presents the $309K as 2025 revenue — handle "
+        "via a book-to-SBA reconciliation note, never by restating the accepted "
+        "statement; (2) Stripe's 2025 1099-K and Predictive Insights' 2025 "
+        "deductions must be reconciled to avoid information-return mismatch."
     )
 
     # Inventory — BevSpot finalized physical count 12/29/2025 (closest to
@@ -1999,12 +2055,13 @@ def write_excel(bs: dict) -> str:
          "which show annualized MB GR implied receipts vs Toast MB POS and "
          "S&U implied receipts vs Toast NON-MB POS."),
         ("SPEC FLAG 6",
-         "Accounts Receivable — $373,592",
-         "The 2024 Schedule L ending A/R balance of $373,592 is unusually large for a "
-         "cash-and-card restaurant. "
-         "Possible explanations: Toast settlement receivable, related-party advances, or prior-year "
-         "bookkeeping artifact. Accountant: confirm 2025 treatment (write-off, reclassify, or carry). "
-         "This figure is carried forward as the 2025 A/R placeholder in this workbook."),
+         "Accounts Receivable — RESOLVED at $61,755.92; $311,836.08 carry-forward variance",
+         "2025 A/R is booked at the settlement-verified revenue-in-transit of $61,755.92 "
+         "(Dec 30-31 card settlements received 1/2/2026 $46,406.64, cross-checked to Toast POS "
+         "net card receipts; December hookah fee $15,000; Stripe in-transit $234.65; Toast EOM "
+         "$114.63). The 2024 Schedule L balance of $373,592 is unsupported by settlement data — "
+         "the $311,836.08 variance requires BAED disposition: write-down through 2025 book income, "
+         "reclassification (related-party/owner advance), or amendment of the 2024 Schedule L."),
     ]
 
     all_flags_for_tab = spec_flags[:]
@@ -2260,8 +2317,11 @@ def write_pdf(bs: dict) -> str:
         f"The unreconciled difference ({_money(bs['unreconciled_difference'])}) is a plug "
         "that forces the sheet to balance. "
         "It will collapse to $0 when net income 2025 and depreciation "
-        "are supplied by the accountant (cash, inventory, and accrued payroll are "
-        "resolved; AP is carried as a $69,275.37 estimate pending BAED true-up).",
+        "are supplied by the accountant (cash, inventory, A/R, and accrued payroll are "
+        "resolved; AP is carried as a $69,275.37 estimate pending BAED true-up). "
+        "A negative plug indicates 2025 book net income must absorb the A/R "
+        "carry-forward write-down of $311,836.08 unless BAED reclassifies or "
+        "amends the 2024 Schedule L.",
         STYLE_NOTE,
     ))
     story.append(PageBreak())
@@ -2670,8 +2730,12 @@ def write_pdf(bs: dict) -> str:
          "$0",
          "No contribution records. Confirm with bank records and partner agreements."],
         ["Accounts Receivable 2025",
-         "$373,592 (2024 balance)",
-         "Large A/R for a card restaurant. Confirm treatment: collect, write off, or reclassify."],
+         "$61,755.92 (RESOLVED)",
+         "Settlement-verified revenue-in-transit: Dec 30-31 card settlements "
+         "$46,406.64 (received 1/2/2026, ties to Toast POS) + Dec hookah fee "
+         "$15,000 + Stripe $234.65 + Toast EOM $114.63. DECISION NEEDED: "
+         "$311,836.08 of the 2024 carry-forward is unsupported — write down, "
+         "reclassify, or amend 2024."],
         ["Inventory 2025",
          "$29,377 (RESOLVED)",
          "BevSpot finalized physical count 12/29/2025 (212 items, Ashley Baines); "

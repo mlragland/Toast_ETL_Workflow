@@ -398,3 +398,28 @@ def test_balance_sheet_still_ties_after_v24_inputs():
     bs = build_balance_sheet()
     a, l = bs["total_assets"], bs["total_liabilities"]
     assert round(a - l - bs["total_equity"], 2) == 0.0
+
+
+# --- v2.5: accounts receivable settlement-verified (owner-directed 2026-10-11)
+
+def test_accounts_receivable_settlement_verified():
+    from adjusted_balance_sheet_2025 import (
+        ACCOUNTS_RECEIVABLE_1231_2025, ACCOUNTS_RECEIVABLE_1231_2025_TOTAL,
+        BEGINNING_BALANCES)
+    ar = ACCOUNTS_RECEIVABLE_1231_2025
+    assert ar["toast_card_settlements_in_transit"] == 46406.64
+    assert ar["predictive_insights_dec_hookah"] == 15000.00
+    assert ACCOUNTS_RECEIVABLE_1231_2025_TOTAL == round(sum(ar.values()), 2) == 61755.92
+    # Citizens 1/2/2026 deposits: 29,249.04 + 17,157.60
+    assert round(29249.04 + 17157.60, 2) == ar["toast_card_settlements_in_transit"]
+    # carry-forward variance flagged to BAED
+    assert round(BEGINNING_BALANCES["accounts_receivable"]
+                 - ACCOUNTS_RECEIVABLE_1231_2025_TOTAL, 2) == 311836.08
+    bs = build_balance_sheet()
+    assert bs["assets"]["accounts_receivable"] == ACCOUNTS_RECEIVABLE_1231_2025_TOTAL
+
+
+def test_balance_sheet_still_ties_after_v25_inputs():
+    bs = build_balance_sheet()
+    a, l = bs["total_assets"], bs["total_liabilities"]
+    assert round(a - l - bs["total_equity"], 2) == 0.0
