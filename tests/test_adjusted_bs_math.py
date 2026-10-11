@@ -277,3 +277,68 @@ def test_taxes_payable_ineligible_exact_half_percent_not_settled():
     ]
     result = taxes_payable_at_yearend(rows, asof="2025-12-31", discount_eligible=False)
     assert result == 5.00  # shortfall kept as payable; not settled
+
+
+# ---------------------------------------------------------------------------
+# v2.1 — reconciled distributions, fixed-asset additions, service charge tie-out
+# ---------------------------------------------------------------------------
+
+from adjusted_balance_sheet_2025 import (
+    RECLASS_2025, DISTRIBUTIONS_2025_RECONCILED, FIXED_ASSET_ADDITIONS_2025,
+    SERVICE_CHARGE_2025, OFF_POS_REVENUE_2025, BEGINNING_BALANCES,
+)
+
+
+def test_reconciled_distributions_walk():
+    """Reconciled = raw owner total - owner A-bucket spend + non-owner C items."""
+    raw = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
+    expected = round(
+        raw
+        - (RECLASS_2025["owner_disc_deductible_A"] + RECLASS_2025["owner_travel_deductible_A"])
+        + RECLASS_2025["non_owner_distribution_C"],
+        2,
+    )
+    assert DISTRIBUTIONS_2025_RECONCILED == expected == 200268.79
+
+
+def test_reclass_owner_categories_tie_to_bq_net_of_credits():
+    """Owner-category gross debits (A + C) less credits must equal the BQ net totals."""
+    disc_net = round(
+        RECLASS_2025["owner_disc_deductible_A"] + RECLASS_2025["owner_disc_distribution_C"] - 690.00, 2)
+    travel_net = round(
+        RECLASS_2025["owner_travel_deductible_A"] + RECLASS_2025["owner_travel_distribution_C"] - 959.96, 2)
+    assert disc_net == abs(BQ_RESULTS["owner_distributions_2025"]["Owner Discretionary Expenses"])
+    assert travel_net == abs(BQ_RESULTS["owner_distributions_2025"]["Owner Travel"])
+    assert round(690.00 + 959.96, 2) == RECLASS_2025["owner_category_credits"]
+
+
+def test_balance_sheet_uses_reconciled_distributions():
+    bs = build_balance_sheet()
+    assert bs["equity"]["distributions_2025"] == -DISTRIBUTIONS_2025_RECONCILED
+
+
+def test_gross_fixed_assets_includes_2025_additions():
+    bs = build_balance_sheet()
+    assert bs["assets"]["gross_fixed_assets"] == round(
+        BEGINNING_BALANCES["depreciable_assets"] + FIXED_ASSET_ADDITIONS_2025, 2)
+
+
+def test_service_charge_split_math():
+    """Owner directive 2026-10-11: LOV3 split removed — 100% pass-through via payroll.
+    The former operational split (70%/50%) is retained as an informational figure."""
+    sc = SERVICE_CHARGE_2025
+    assert sc["staff_share_passthrough"] == sc["gross_collected"]
+    assert sc["house_retained"] == 0.0
+    assert round(sc["waitstaff_base"] + sc["bottle_manager_base"], 2) == sc["gross_collected"]
+    former_staff = round(0.70 * sc["waitstaff_base"] + 0.50 * sc["bottle_manager_base"], 2)
+    assert abs(round(sc["gross_collected"] - former_staff, 2) - sc["former_house_split"]) < 0.02
+
+
+def test_balance_sheet_flags_service_charge_tieout_and_off_pos_revenue():
+    bs = build_balance_sheet()
+    joined = " ".join(bs["flags"])
+    assert "SERVICE CHARGE TIE-OUT" in joined
+    assert "PASS-THROUGH" in joined
+    assert "OFF-POS REVENUE" in joined
+    total = round(sum(OFF_POS_REVENUE_2025.values()), 2)
+    assert f"${total:,.2f}" in joined

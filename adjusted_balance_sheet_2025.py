@@ -20,8 +20,8 @@ from itertools import combinations
 # they are holding. Bump on any re-issue.
 # ---------------------------------------------------------------------------
 
-PACKAGE_VERSION = "2.0"
-PACKAGE_VERSION_DATE = "2026-10-10"
+PACKAGE_VERSION = "2.1"
+PACKAGE_VERSION_DATE = "2026-10-11"
 
 # ---------------------------------------------------------------------------
 # Tax rates
@@ -729,10 +729,94 @@ BQ_RESULTS = {
     "owner_distributions_note": (
         "BQ bank category total for owner-attributable spend = $225,496.37. "
         "Prior P&L showed $231,907 — delta of ~$6,411. "
-        "Possible gap: uncategorized rows ($1,740.77) and potential owner transactions "
-        "miscategorized as Credit Card Payments ($48,759.49) or Admin & Office ($23,416.95). "
+        "Possible gap: uncategorized rows ($1,740.77) or Admin & Office ($23,416.95). "
+        "Credit Card Payments ($48,759.49) are NOT owner spend — owner-confirmed "
+        "2026-10-11 as Marketing & Ad spend / SMS blasts (reclass bucket G). "
         "ACCOUNTANT INPUT: reconcile to K-1 distribution amount before filing."
     ),
+}
+
+
+# ---------------------------------------------------------------------------
+# 2025 Expense Reclassification pivot — bucket x source category
+# Source: expense_reclass_2025.py classify() run against BankTransactions_raw
+# (2025, amount < 0) on 2026-10-11.  Debits-only; the owner-category credits
+# below reconcile these gross figures to the net BQ_RESULTS category totals.
+#
+# Owner categories (components of the $225,496.37 combined owner-attributable):
+#   Owner Discretionary: A (deductible) 31,242.77 + C (distribution) 13,123.64
+#                        = gross debits 44,366.41; credits +690.00 -> net 43,676.41
+#   Owner Travel:        A 9,781.41 + C 592.00 = 10,373.41; credits +959.96 -> net 9,413.45
+#   Owner Draws / Transfers (172,406.51) is NOT in the reclass schedule —
+#   it remains 100% distribution.
+# Non-owner categories contributing C (distribution) items:
+#   Competitive Research 7,516.89 | Transportation (DERWIN) 750.00
+#   Travel & Lodging (Brazil/DR) 7,529.71  -> total 15,796.60
+# ---------------------------------------------------------------------------
+RECLASS_2025 = {
+    "owner_draws_transfers":        172406.51,  # all distribution
+    "owner_disc_deductible_A":       31242.77,  # -> Sec. 162 expense
+    "owner_disc_distribution_C":     13123.64,
+    "owner_travel_deductible_A":      9781.41,  # -> Sec. 162 expense
+    "owner_travel_distribution_C":      592.00,
+    "owner_category_credits":          1649.96,  # refunds within owner categories (690.00 + 959.96)
+    "non_owner_distribution_C":       15796.60,  # Polekatz/Carioca/Rio, Derwin transport, Brazil/DR lodging
+}
+
+# Reconciled 2025 distributions for the capital roll-forward / K-1 Line 19A:
+#   combined owner-attributable (net)        225,496.37
+#   less A-bucket owner spend -> Sec. 162    (41,024.18)  = 31,242.77 + 9,781.41
+#   plus C items from non-owner categories    15,796.60
+#   = reconciled distributions               200,268.79
+# (Owner-category credits are already netted inside the 225,496.37; whether they
+#  offset the expense portion instead is a BAED call worth +/- $1,649.96.)
+DISTRIBUTIONS_2025_RECONCILED = round(
+    abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
+    - (RECLASS_2025["owner_disc_deductible_A"] + RECLASS_2025["owner_travel_deductible_A"])
+    + RECLASS_2025["non_owner_distribution_C"],
+    2,
+)  # 200,268.79
+
+# 2025 fixed-asset additions — reclass bucket E (Capital Equipment 18,082.31 +
+# Construction Build Out 30,000.00).  Removed from expense; capitalized here.
+# VIC3 payments (30,000.00, bucket F) are deductible per owner directive
+# 2026-10-11 (LOV3 is guarantor on the VIC3 construction loan) — NOT capitalized.
+FIXED_ASSET_ADDITIONS_2025 = 48082.31
+
+# ---------------------------------------------------------------------------
+# 2025 Service Charge tie-out (owner directives 2026-10-11: tie the service
+# charge paid through payroll to the top line, shown as a pass-through; the
+# LOV3 split is REMOVED — 100% of the service charge routes to payroll).
+# Source: PaymentDetails_raw, business-day basis (4 AM cutoff), voided excluded,
+# split by station (Bottle Manager vs. waitstaff/bartender), pulled 2026-10-11.
+# Top-line tie (payments bridge): net sales 4,250,961.87 + sales tax 350,462.10
+# + service charges 867,901.75 = 5,469,325.72 vs. total payments ~5,477,517
+# (residual ~8,191 = refunds / house accounts / rounding).
+# PRIOR operational split (70% staff / 30% house waitstaff; 50/50 Bottle Mgr)
+# would have retained $297,470.34 as LOV3 income — superseded for this package
+# by the owner directive: the entire gross is staff compensation through
+# payroll (Choice Employer), net $0 to the P&L.  SUBSTANTIATION: the 2025
+# payroll register must show the full amount flowing through as wages.
+# Voluntary tips (376,301.98) are 100% staff pass-through and excluded here.
+# ---------------------------------------------------------------------------
+SERVICE_CHARGE_2025 = {
+    "gross_collected":          867901.75,  # ties to top line via payments bridge
+    "waitstaff_base":           682402.66,  # non-Bottle-Manager stations
+    "bottle_manager_base":      185499.09,
+    "staff_share_passthrough":  867901.75,  # 100% via payroll — owner directive 2026-10-11 (LOV3 split removed)
+    "house_retained":                0.00,  # formerly 297,470.34 under the 70/30 & 50/50 operational split
+    "former_house_split":       297470.34,  # informational — what the operational split would have retained
+    "voluntary_tips_passthrough": 376301.98,  # 100% staff; informational
+}
+
+# ---------------------------------------------------------------------------
+# 2025 revenue documented in bank data but OUTSIDE the Toast POS revenue basis.
+# These are additive to the Toast-based top line and must be in book revenue.
+# ---------------------------------------------------------------------------
+OFF_POS_REVENUE_2025 = {
+    "stripe_cover_charges":       187167.56,  # Stripe settlements (door/cover), 238 deposits, BankTransactions_raw
+    "predictive_insights_hookah": 109080.00,  # hookah operator deposits, 7 deposits (May-Dec 2025)
+    "event_deposits":              13200.00,  # Events Revenue category, 1 deposit
 }
 
 
@@ -789,18 +873,30 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         f"${inventory:,.2f} forward. Confirm with 12/31/2025 physical count."
     )
 
-    # Fixed Assets — 2024 Schedule L gross amount is definitive.
+    # Fixed Assets — 2024 Schedule L gross amount plus 2025 additions from the
+    # expense reclassification schedule (bucket E: Capital Equipment $18,082.31 +
+    # Construction Build Out $30,000.00 = $48,082.31, capitalized per Form 4562).
     # Accumulated Depreciation: 2024 ending = $9,278; 2025 depreciation expense is
     # required from the fixed-asset schedule to compute the 12/31/2025 balance.
-    gross_fixed_assets = BEGINNING_BALANCES["depreciable_assets"]  # 80,900
+    fixed_asset_additions = FIXED_ASSET_ADDITIONS_2025  # 48,082.31
+    gross_fixed_assets = BEGINNING_BALANCES["depreciable_assets"] + fixed_asset_additions  # 80,900 + 48,082.31
     accum_dep_prior = BEGINNING_BALANCES["accumulated_depreciation"]  # 9,278
     depreciation_2025 = 0.0  # ACCOUNTANT INPUT
     accumulated_depreciation = accum_dep_prior + depreciation_2025
     net_fixed_assets = gross_fixed_assets - accumulated_depreciation
     flags.append(
+        f"NOTE — fixed_asset_additions_2025: ${fixed_asset_additions:,.2f} of 2025 bank spend "
+        "(Capital Equipment $18,082.31 + Construction Build Out $30,000.00, reclass bucket E) "
+        "is capitalized here and removed from expense. Sec. 179 / bonus depreciation on "
+        "Form 4562 likely recovers the full amount in 2025 — BAED to elect. VIC3 payments "
+        "($30,000, bucket F) are NOT capitalized — deductible per owner directive 2026-10-11 "
+        "(LOV3 is guarantor on the VIC3 construction loan)."
+    )
+    flags.append(
         "ACCOUNTANT INPUT — depreciation_2025: 2025 depreciation expense required "
-        "from fixed-asset schedule. Placeholder $0 used; accumulated depreciation "
-        f"carried at 2024 ending balance of ${accum_dep_prior:,.2f}."
+        "from fixed-asset schedule (including any Sec. 179/bonus on the "
+        f"${fixed_asset_additions:,.2f} of 2025 additions). Placeholder $0 used; "
+        f"accumulated depreciation carried at 2024 ending balance of ${accum_dep_prior:,.2f}."
     )
 
     # Legal Order / Bond — $59,175 debit on 2025-08-25 was fully reversed
@@ -935,28 +1031,77 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         "available. Placeholder $0. Confirm with bank records and partner agreements."
     )
 
-    # 2025 distributions — BQ bank category total for owner-attributable spend.
-    # BQ figure: $225,496.37 (Owner Draws/Transfers + Discretionary + Travel).
-    # Prior SBA P&L showed $231,907; delta ~$6,411.  Both figures stated here;
-    # accountant must reconcile to K-1 distribution amount before filing.
-    distributions_2025 = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
+    # 2025 distributions — RECONCILED to the expense reclassification schedule
+    # (single source of truth; eliminates the double-count between the raw BQ
+    # owner-category total and the reclass C bucket).  Walk:
+    #   combined owner-attributable (BQ, net)   225,496.37
+    #   less A-bucket owner spend -> Sec. 162   (41,024.18)
+    #   plus C items from non-owner categories   15,796.60
+    #   = reconciled distributions              200,268.79
+    raw_owner_total = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
+    distributions_2025 = DISTRIBUTIONS_2025_RECONCILED
     flags.append(
-        f"NOTE — distributions_2025: BQ bank-category total = ${distributions_2025:,.2f}. "
-        "Prior SBA P&L showed $231,907 Owner Draws (delta ~$6,411). "
-        "Possible gap: uncategorized rows ($1,740.77) or transactions miscategorized "
-        "as Credit Card Payments / Admin & Office. "
-        f"Using BQ figure (${distributions_2025:,.2f}) as the working value; "
-        "reconcile to K-1 distribution amount before filing."
+        f"NOTE — distributions_2025 RECONCILED = ${distributions_2025:,.2f} "
+        f"(raw BQ owner-category total ${raw_owner_total:,.2f} "
+        f"LESS ${RECLASS_2025['owner_disc_deductible_A'] + RECLASS_2025['owner_travel_deductible_A']:,.2f} "
+        "of owner-category spend reclassified to Sec. 162 expense [reclass buckets A: "
+        f"Discretionary ${RECLASS_2025['owner_disc_deductible_A']:,.2f} + "
+        f"Travel ${RECLASS_2025['owner_travel_deductible_A']:,.2f}] "
+        f"PLUS ${RECLASS_2025['non_owner_distribution_C']:,.2f} of nondeductible C items from "
+        "non-owner categories [Polekatz/Carioca/Rio entertainment, Derwin transport, Brazil/DR "
+        "lodging]). This is the single working figure — do NOT also add the reclass C bucket "
+        "to the raw total (double-count). Owner-category credits of "
+        f"${RECLASS_2025['owner_category_credits']:,.2f} are netted inside the raw total; "
+        "BAED may offset them against the expense portion instead (+/- that amount). "
+        "Prior SBA P&L showed $231,907 Owner Draws; residual gap vs. raw total ~$6,411 "
+        "(uncategorized rows $1,740.77 / Admin & Office). Reconcile to K-1 before filing."
     )
     flags.append(
         f"PER-PARTNER DISTRIBUTIONS (owner directive 2026-10-11): the ${distributions_2025:,.2f} "
-        "total is attributed to EDDIE JASPER for K-1 Line 19A per Maurice — the 2025 draws are "
-        "considered Eddie's. All bank cards (*1201, *1370) are LOV3 business cards, not personal "
-        "cards. Maurice and Derwin: $0 Line 19A for 2025 unless BAED identifies draws in partner "
-        "records not visible in the bank data. Accountant still determines whether the "
-        "Discretionary ($43,676.41) and Travel ($9,413.45) components are distributions, "
-        "Sec. 162 business expenses, or Sec. 707(c) guaranteed payments — any distribution "
-        "portion is Eddie-attributed."
+        "reconciled total is attributed to EDDIE JASPER for K-1 Line 19A per Maurice — the 2025 "
+        "draws are considered Eddie's. All bank cards (*1201, *1370) are LOV3 business cards, not "
+        "personal cards. Maurice and Derwin: $0 Line 19A for 2025 unless BAED identifies draws in "
+        "partner records not visible in the bank data. Accountant still determines whether any "
+        "distribution components are better treated as Sec. 707(c) guaranteed payments — any "
+        "distribution portion is Eddie-attributed."
+    )
+
+    # Service charge tie-out (owner directive 2026-10-11): gross service charges
+    # tie to the top line via the payments bridge; the staff share paid through
+    # payroll is presented as a pass-through; the house-retained share is
+    # taxable income to LOV3 not in the POS revenue basis.
+    _sc = SERVICE_CHARGE_2025
+    flags.append(
+        f"SERVICE CHARGE TIE-OUT (2025): gross service charges collected "
+        f"${_sc['gross_collected']:,.2f} tie to the top line via the payments bridge "
+        "(net sales $4,250,961.87 + sales tax $350,462.10 + service charges "
+        f"${_sc['gross_collected']:,.2f} = $5,469,325.72 vs. total payments ~$5,477,517; "
+        "~$8,191 residual = refunds/house accounts). OWNER DIRECTIVE 2026-10-11: the LOV3 "
+        f"split is REMOVED — 100% (${_sc['staff_share_passthrough']:,.2f}) is a PASS-THROUGH, "
+        "paid to staff through payroll (Choice Employer) as wage expense exactly offset by "
+        "service-charge income (net $0 to the P&L; IRS Rev. Rul. 2012-18 treats distributed "
+        "service charges as wages). No retained-service-charge income is booked. "
+        f"[The prior operational split — 70% of waitstaff base ${_sc['waitstaff_base']:,.2f} "
+        f"+ 50% of Bottle Manager base ${_sc['bottle_manager_base']:,.2f} — would have "
+        f"retained ${_sc['former_house_split']:,.2f} as LOV3 income.] "
+        "SUBSTANTIATION REQUIRED: the 2025 Choice Employer payroll register must show the "
+        f"full ${_sc['gross_collected']:,.2f} flowing through as staff compensation; any "
+        "portion NOT actually paid as wages reverts to taxable income to LOV3 — BAED to "
+        f"verify. Voluntary tips ${_sc['voluntary_tips_passthrough']:,.2f} are 100% staff "
+        "pass-through."
+    )
+
+    # Off-POS revenue documented in bank data (additive to Toast POS top line).
+    _op = OFF_POS_REVENUE_2025
+    _op_total = round(sum(_op.values()), 2)
+    flags.append(
+        f"OFF-POS REVENUE (2025): ${_op_total:,.2f} of bank-documented revenue is outside "
+        f"the Toast POS basis and must be in book revenue — Stripe cover charges "
+        f"${_op['stripe_cover_charges']:,.2f}, Predictive Insights hookah deposits "
+        f"${_op['predictive_insights_hookah']:,.2f}, private event deposits "
+        f"${_op['event_deposits']:,.2f}. Total book revenue therefore exceeds the Toast POS "
+        "net-sales figure — keep the additional-revenue framing consistent "
+        "(additional revenue over the filed MB base; referred to BAED)."
     )
 
     # 2025 net income — placeholder 0; reference the adjusted P&L / SBA package.
@@ -2006,7 +2151,10 @@ def write_pdf(bs: dict) -> str:
         ["Total Partners' Capital",              _money(bs["total_equity"])],
         ["Unreconciled Difference (plug)",       _money(bs["unreconciled_difference"])],
         ["Beginning Partners' Capital (1/1/25)", _money(BEGINNING_BALANCES["partners_capital"])],
-        ["Distributions 2025 (BQ bank data)",   _money(-abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"]))],
+        ["Distributions 2025 (reconciled to reclass schedule)", _money(bs["equity"]["distributions_2025"])],
+        ["Service Charges 2025 — gross (ties to top line)",     _money(SERVICE_CHARGE_2025["gross_collected"])],
+        ["  Pass-through to staff via payroll (100% — LOV3 split removed)",
+         _money(SERVICE_CHARGE_2025["staff_share_passthrough"])],
     ]
     tbl = _two_col_table("Balance Sheet Line", "Amount", kpi_rows,
                          col_widths=[body_w * 0.65, body_w * 0.35])
@@ -2033,7 +2181,7 @@ def write_pdf(bs: dict) -> str:
     annual_var_non   = round(annual_toast_non - annual_impl_non, 2)
 
     _over_2508 = probable_overpayments(MB_GR).get("2508", 0.0)
-    _distr_total = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
+    _distr_total = DISTRIBUTIONS_2025_RECONCILED
 
     story += [
         Paragraph("TRANSMITTAL MEMO", STYLE_EYEBROW),
@@ -2076,9 +2224,28 @@ def write_pdf(bs: dict) -> str:
             STYLE_BODY,
         ),
         Paragraph(
-            "<b>3. Service charges.</b> Service charges and gratuities are excluded from sales "
-            "revenue throughout this package; the staff share is passed to staff through payroll. "
-            "Tax-reporting treatment is deferred to BAED.",
+            f"<b>3. Service charge tie-out.</b> 2025 gross service charges of "
+            f"{_pf(SERVICE_CHARGE_2025['gross_collected'])} tie to the top line via the payments "
+            f"bridge (net sales $4,250,961.87 + sales tax $350,462.10 + service charges = "
+            f"~$5.47M total payments). Per owner directive 2026-10-11 the LOV3 split is removed: "
+            f"100% ({_pf(SERVICE_CHARGE_2025['staff_share_passthrough'])}) is routed to staff "
+            f"through payroll (Choice Employer) and presented as a pass-through — wage expense "
+            f"exactly offset by service-charge income, net $0 (IRS Rev. Rul. 2012-18 treats "
+            f"distributed service charges as wages). No retained-service-charge income is "
+            f"booked. SUBSTANTIATION: the 2025 payroll register must show the full amount "
+            f"flowing through as staff compensation; any portion not actually paid as wages "
+            f"reverts to taxable income to LOV3. Service charges and gratuities remain excluded "
+            f"from sales revenue throughout this package.",
+            STYLE_BODY,
+        ),
+        Paragraph(
+            f"<b>4. Off-POS bank-documented revenue.</b> "
+            f"{_pf(sum(OFF_POS_REVENUE_2025.values()))} of 2025 revenue is documented in bank "
+            f"data but outside the Toast POS basis: Stripe cover charges "
+            f"{_pf(OFF_POS_REVENUE_2025['stripe_cover_charges'])}, Predictive Insights hookah "
+            f"deposits {_pf(OFF_POS_REVENUE_2025['predictive_insights_hookah'])}, private event "
+            f"deposits {_pf(OFF_POS_REVENUE_2025['event_deposits'])}. These are additive to the "
+            f"Toast-based top line and must appear in book revenue.",
             STYLE_BODY,
         ),
         Spacer(1, 0.08 * inch),
@@ -2093,12 +2260,14 @@ def write_pdf(bs: dict) -> str:
             STYLE_BODY,
         ),
         Paragraph(
-            f"<b>2. Per-partner distribution classification.</b> Total 2025 owner distributions of "
-            f"{_pf(_distr_total)} (bank data) are attributed to Eddie Jasper for K-1 Line 19A "
-            f"(owner-confirmed 2026-10-11; all bank cards are LOV3 business cards; Maurice and "
-            f"Derwin $0 unless partner records show otherwise). BAED to classify the "
-            f"discretionary/travel components (§707(c) guaranteed payment vs. §162 expense vs. "
-            f"distribution).",
+            f"<b>2. Per-partner distribution classification.</b> Reconciled 2025 owner "
+            f"distributions of {_pf(_distr_total)} (raw bank-category total $225,496.37, less "
+            f"$41,024.18 reclassified to §162 expense, plus $15,796.60 of nondeductible items "
+            f"from non-owner categories — see the Expense Reclassification Schedule) are "
+            f"attributed to Eddie Jasper for K-1 Line 19A (owner-confirmed 2026-10-11; all bank "
+            f"cards are LOV3 business cards; Maurice and Derwin $0 unless partner records show "
+            f"otherwise). BAED to confirm the classification and whether any portion is a "
+            f"§707(c) guaranteed payment.",
             STYLE_BODY,
         ),
         Paragraph(
@@ -2290,7 +2459,7 @@ def write_pdf(bs: dict) -> str:
         return Paragraph(text, STYLE_SMALL)
 
     _mbgr_annual = _pf(sum(period_liabilities(MB_GR).values()))
-    _dist_total = _pf(abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"]))
+    _dist_total = _pf(DISTRIBUTIONS_2025_RECONCILED)
     adj_rows = [
         ["#", "Debit Account", "Credit Account", "Approximate Amount", "Description"],
         ["1", _cell("None — verification only"), _cell("None — verification only"),
@@ -2309,14 +2478,27 @@ def write_pdf(bs: dict) -> str:
          _pf(59175.0),
          _cell("Reverse $59,175 legal hold expense if booked "
                "(hold was reversed 2025-08-29, net = $0)")],
-        ["5", _cell("Cash / Receivable"), _cell("Hookah Revenue"),
-         "TBD",
-         _cell("Record Predictive Insights LLC monthly hookah deposits as additive "
-               "revenue (not in Toast POS)")],
+        ["5", _cell("Cash / Receivable"), _cell("Hookah / Cover / Event Revenue"),
+         _pf(sum(OFF_POS_REVENUE_2025.values())),
+         _cell("Record off-POS bank-documented revenue as additive to the Toast top "
+               f"line: Predictive Insights hookah deposits "
+               f"{_pf(OFF_POS_REVENUE_2025['predictive_insights_hookah'])}, Stripe cover "
+               f"charges {_pf(OFF_POS_REVENUE_2025['stripe_cover_charges'])}, event "
+               f"deposits {_pf(OFF_POS_REVENUE_2025['event_deposits'])}")],
         ["6", _cell("Owner Distributions"), _cell("Cash / Partners' Capital"),
          _dist_total,
-         _cell(f"Confirm BQ bank-category total ({_dist_total}) reconciles to K-1 "
-               "distributions before filing; split by partner for Line 19A")],
+         _cell(f"Confirm reconciled distributions ({_dist_total} = raw bank total "
+               "$225,496.37 − $41,024.18 reclassified to §162 expense + $15,796.60 "
+               "nondeductible items from non-owner categories) ties to K-1 Line 19A "
+               "(all Eddie-attributed per owner directive 2026-10-11)")],
+        ["6a", _cell("Payroll / Wages (service charges — 100% staff)"),
+         _cell("Service Charge Income (pass-through)"),
+         _pf(SERVICE_CHARGE_2025["staff_share_passthrough"]),
+         _cell("Tie the full 2025 service charge paid through payroll to the top "
+               "line as a pass-through: wage expense exactly offset by service-charge "
+               "income (net $0). LOV3 split removed per owner directive 2026-10-11 — "
+               "payroll register must substantiate the full flow-through; any portion "
+               "not paid as wages reverts to taxable LOV3 income.")],
         ["7", _cell("No entry until confirmed"), _cell("—"),
          _pf(24351.95),
          _cell("Probable MB GR 2508 overpayment credit (period paid twice) — confirm "
