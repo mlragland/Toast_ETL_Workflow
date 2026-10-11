@@ -16,6 +16,14 @@ from collections import defaultdict
 from itertools import combinations
 
 # ---------------------------------------------------------------------------
+# Package version — stamped on every output so BAED knows which iteration
+# they are holding. Bump on any re-issue.
+# ---------------------------------------------------------------------------
+
+PACKAGE_VERSION = "2.0"
+PACKAGE_VERSION_DATE = "2026-10-10"
+
+# ---------------------------------------------------------------------------
 # Tax rates
 # ---------------------------------------------------------------------------
 
@@ -152,24 +160,31 @@ BEGINNING_BALANCES = {
     "total_assets": 549839, "total_liabilities": 0, "partners_capital": 549839,
 }
 
+# Owner-confirmed 2026-10-11 (Maurice): Eddie 45% / Derwin 40% / Maurice 15%.
+# Resolves the 2024 K-1 Item J inconsistency (printed %s summed to 160%: 15/45/100 —
+# Derwin's 100% was erroneous; correct figure is 40%). BAED should still reconcile
+# the 2024 K-1s to these percentages before issuing 2025 K-1s.
 PARTNERS = {
     "Maurice Ragland": 0.15,
-    "Eddiele B Jasper": None,
-    "Derwin James": None,
-}  # 2024 K-1 shows only Maurice's 15% capital; others flagged ACCOUNTANT INPUT
+    "Eddiele B Jasper": 0.45,
+    "Derwin James": 0.40,
+}
 
 # Shared narrative for the MB step-change finding — used in Tab 3 variance drivers,
 # Tab 4 SPEC FLAG 1, and the PDF Page 2 drivers section.  Keep per-site headings/short
 # labels local; only the body text lives here.
 MB_STEP_CHANGE_NARRATIVE = (
+    "Toast POS records reflect revenue above the base implied by filed MB returns in "
+    "10 of 12 months of 2025; this excess is presented as ADDITIONAL REVENUE, with no "
+    "characterization of cause. "
     "Jul–Aug 2025 (periods 2507–2508) filed MB base matches Toast POS to the dollar "
-    "(variance <$6), validating the comparison method. "
-    "Under-filed MB GR periods: 2501–2506 (liabilities $1,863–$4,616/mo) AND "
-    "2509–2512 (~$4.2–5.3K/mo); only 2507–2508 (~$17–22K/mo) match Toast. "
-    "Amended/struck returns for 2504–2505 are consistent with a mid-2025 Comptroller "
-    "correction that did NOT persist after August. "
-    "~$2.18M MB base and ~$442K non-MB base probable under-filing across 10 of 12 months. "
-    "Refer to BAED and consider amended Comptroller returns. "
+    "(variance <$6). Periods 2501–2506 (filed liabilities $1,863–$4,616/mo) and "
+    "2509–2512 (~$4.2–5.3K/mo) imply a smaller base than Toast POS for the same months. "
+    "Amended/struck returns exist for periods 2504–2505. "
+    "Additional revenue over filed MB base: ~$2.18M (MB categories) and ~$442K "
+    "(non-MB categories). LOV3 operates under a single TABC Mixed Beverage permit. "
+    "Service charges are excluded from sales revenue throughout this package. "
+    "Referred to BAED for evaluation. "
     "ACCOUNTANT REVIEW REQUIRED before any revenue adjustment is booked."
 )
 
@@ -269,14 +284,42 @@ def timely_filer_discounts(
     return discounts
 
 
-def penalties_and_interest(rows: list, year: int = 2025) -> dict:
-    """Per-period payments minus liability (positive = P&I expense)."""
+# Payment excess above this fraction of the filed liability cannot plausibly be
+# penalty + interest (TX late penalty is 5%/10%); larger excesses are probable
+# overpayments (e.g., a duplicate payment) = Comptroller credit, not expense.
+OVERPAYMENT_THRESHOLD = 0.15
+
+
+def _payment_variances(rows: list, year: int = 2025) -> dict:
+    """Per-period payments minus filed liability (non-struck, |variance| > $0.01)."""
     liabs = period_liabilities(rows, year)
     pays = period_payments(rows, year)
     return {
         p: round(pays.get(p, 0) - liabs[p], 2)
         for p in liabs
         if abs(pays.get(p, 0) - liabs[p]) > 0.01
+    }
+
+
+def penalties_and_interest(rows: list, year: int = 2025) -> dict:
+    """Per-period payment variances small enough to be penalty/interest
+    (excess <= OVERPAYMENT_THRESHOLD x liability; negatives = unpaid balance).
+    Larger excesses are excluded — see probable_overpayments()."""
+    liabs = period_liabilities(rows, year)
+    return {
+        p: v for p, v in _payment_variances(rows, year).items()
+        if v <= OVERPAYMENT_THRESHOLD * liabs[p]
+    }
+
+
+def probable_overpayments(rows: list, year: int = 2025) -> dict:
+    """Per-period payment excess too large to be penalty/interest
+    (> OVERPAYMENT_THRESHOLD x filed liability) — probable Comptroller
+    credit. Flagged for accountant confirmation, never booked."""
+    liabs = period_liabilities(rows, year)
+    return {
+        p: v for p, v in _payment_variances(rows, year).items()
+        if v > OVERPAYMENT_THRESHOLD * liabs[p]
     }
 
 
@@ -770,6 +813,27 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         "Remove from OPEX if previously booked as an expense."
     )
 
+    # Probable Comptroller overpayment credit — payments exceeding filed liability
+    # by more than any plausible P&I.  Not booked as an asset (placeholder $0);
+    # flagged for accountant confirmation via the official account statement.
+    _overpays = {}
+    for _label, _rows in (("MB GR", MB_GR), ("MB Sales", MB_SALES), ("S&U", SALES_USE)):
+        for _p, _amt in probable_overpayments(_rows).items():
+            _overpays[f"{_label} {_p}"] = _amt
+    if _overpays:
+        _tot = round(sum(_overpays.values()), 2)
+        _detail = "; ".join(f"${a:,.2f} ({k})" for k, a in sorted(_overpays.items()))
+        flags.append(
+            f"ACCOUNTANT INPUT — comptroller_credit: payments exceed filed liability "
+            f"by {_detail} — total ${_tot:,.2f} probable Comptroller credit, NOT a "
+            "penalties-and-interest expense. MB GR 2508 was paid twice ($23,216.41 on "
+            "2025-10-02 + $23,246.41 on 2025-10-14 vs $22,110.87 filed); the first "
+            "payment's $1,105.54 excess equals exactly 5% statutory late penalty, so the "
+            "second payment appears to be a duplicate. Not booked as an asset "
+            "(placeholder $0). Confirm via Form 00-957 Statement of Account; "
+            "refund via Form 00-985."
+        )
+
     assets = {
         "cash":                    round(cash, 2),
         "accounts_receivable":     round(accounts_receivable, 2),
@@ -821,11 +885,25 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         "Placeholder $0. Confirm with vendor invoices outstanding at 12/31/2025."
     )
 
-    # Accrued Payroll — no payroll accrual data available; placeholder 0.
+    # Accrued Payroll — pay period spanning 12/31/2025 (Wed); wages earned
+    # Dec 29-31 were paid in Jan 2026.  Includes the staff share of service
+    # charges, which is passed directly to staff through payroll.  Placeholder 0.
     accrued_payroll = 0.0
     flags.append(
-        "ACCOUNTANT INPUT — accrued_payroll: no payroll accrual data available. "
-        "Placeholder $0. Confirm with pay-period cutoff at 12/31/2025."
+        "ACCOUNTANT INPUT — accrued_payroll: wages earned Dec 29-31, 2025 "
+        "(12/31 was a Wednesday mid-pay-period) were paid in Jan 2026 and belong "
+        "on this balance sheet under accrual basis. Includes the staff share of "
+        "service charges for those days (passed directly to staff through payroll). "
+        "Placeholder $0. Source: Toast Labor API time entries "
+        "(toast_labor_pull.py --start 20251229 --end 20251231) x wage rates plus "
+        "the payroll register for the period paid in Jan 2026."
+    )
+
+    # Contingency evaluation — deferred to BAED (ASC 450); no amount stated.
+    flags.append(
+        "ACCOUNTANT INPUT — contingency_evaluation: BAED to evaluate whether the "
+        "additional-revenue variance over filed MB amounts requires any accrual "
+        "or disclosure (ASC 450). No amount is asserted in this package."
     )
 
     # Presentation note: 2024 Schedule L reported zero liabilities; taxes_payable
@@ -870,6 +948,16 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         f"Using BQ figure (${distributions_2025:,.2f}) as the working value; "
         "reconcile to K-1 distribution amount before filing."
     )
+    flags.append(
+        f"PER-PARTNER DISTRIBUTIONS (owner directive 2026-10-11): the ${distributions_2025:,.2f} "
+        "total is attributed to EDDIE JASPER for K-1 Line 19A per Maurice — the 2025 draws are "
+        "considered Eddie's. All bank cards (*1201, *1370) are LOV3 business cards, not personal "
+        "cards. Maurice and Derwin: $0 Line 19A for 2025 unless BAED identifies draws in partner "
+        "records not visible in the bank data. Accountant still determines whether the "
+        "Discretionary ($43,676.41) and Travel ($9,413.45) components are distributions, "
+        "Sec. 162 business expenses, or Sec. 707(c) guaranteed payments — any distribution "
+        "portion is Eddie-attributed."
+    )
 
     # 2025 net income — placeholder 0; reference the adjusted P&L / SBA package.
     # Do not invent a number here; the accrual-basis P&L holds the book figure.
@@ -880,12 +968,13 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         "for the book net income figure. Insert here before filing K-1s."
     )
 
-    # Partner ownership — Maurice Ragland 15% confirmed via 2024 K-1.
-    # Remaining 85% (Eddiele B Jasper and Derwin James) split unknown.
     flags.append(
-        "ACCOUNTANT INPUT — partner_ownership: Maurice Ragland = 15% (from 2024 K-1). "
-        "Ownership percentages for Eddiele B Jasper and Derwin James are unknown. "
-        "Confirm from the LLC operating agreement before allocating K-1 income/loss."
+        "PARTNER OWNERSHIP (owner-confirmed 2026-10-11): Eddiele B Jasper 45%, "
+        "Derwin James 40%, Maurice Ragland 15% (sums to 100%). The 2024 K-1 Item J "
+        "percentages (15/45/100, summing to 160% — Derwin's printed 100% erroneous) and "
+        "the $(35,161) loss printed in full on all three K-1s remain internally "
+        "inconsistent — BAED should reconcile the 2024 K-1s to these percentages before "
+        "issuing 2025 K-1s. Tax-basis capital required on 2025 Item L."
     )
 
     ending_capital = round(
@@ -1155,7 +1244,8 @@ def write_excel(bs: dict) -> str:
     ws1["A1"] = "LOV3 Restaurant & Lounge LLC — Adjusted Balance Sheet (K-1 Prep)"
     ws1["A1"].font = Font(name="Calibri", bold=True, size=14)
     ws1.merge_cells("A2:C2")
-    ws1["A2"] = "Accrual Basis  |  Prepared for Sanchez Burnside / BAED Corporation"
+    ws1["A2"] = (f"Accrual Basis  |  Prepared for Sanchez Burnside / BAED Corporation"
+                 f"  |  Version {PACKAGE_VERSION} — {PACKAGE_VERSION_DATE}")
     ws1["A2"].font = Font(name="Calibri", size=9.5, italic=True, color="555555")
     ws1.merge_cells("A3:C3")
     ws1["A3"] = "ACCOUNTANT INPUT cells highlighted yellow — do not present as final until resolved"
@@ -1208,7 +1298,7 @@ def write_excel(bs: dict) -> str:
     rows_liab = [
         ("Taxes Payable (TX Comptroller)",   0.0,  liabilities["taxes_payable"],   False),
         ("Accounts Payable",                 0.0,  liabilities["accounts_payable"], True),
-        ("Accrued Payroll",                  0.0,  liabilities["accrued_payroll"],  True),
+        ("Accrued Payroll (incl. staff svc-charge share)", 0.0, liabilities["accrued_payroll"], True),
     ]
     for label, v24, v25, is_input in rows_liab:
         _label(ws1, r, 1, label, indent=1)
@@ -1305,7 +1395,7 @@ def write_excel(bs: dict) -> str:
         headers = [
             "Period Code", "Period Name", "Filed Date", "Type",
             "Filed Liability ($)", "Payments Made ($)",
-            "Penalties & Interest ($)", "Implied Receipts ($)",
+            "Payment Variance ($)", "Implied Receipts ($)",
         ]
         for c, h in enumerate(headers, 1):
             cell = ws.cell(row=r, column=c, value=h)
@@ -1317,7 +1407,8 @@ def write_excel(bs: dict) -> str:
         # Data rows — per period
         liabs = period_liabilities(rows)
         pays  = period_payments(rows)
-        pi    = penalties_and_interest(rows)
+        pi    = _payment_variances(rows)
+        over  = probable_overpayments(rows)
         impl  = implied_receipts(liabs, rate)
 
         # Get unique periods in calendar order
@@ -1350,9 +1441,9 @@ def write_excel(bs: dict) -> str:
                 if c in (5, 6, 7, 8):
                     cell.number_format = '"$"#,##0.00'
                     cell.alignment = Alignment(horizontal="right")
-                    # Highlight P&I > 0 in amber
+                    # Amber = plausible P&I; red = probable overpayment credit
                     if c == 7 and val > 0.01:
-                        cell.fill = _fill("FFE8A0")
+                        cell.fill = _fill("F4B8B8" if period in over else "FFE8A0")
                 else:
                     cell.alignment = Alignment(horizontal="left")
                 cell.font = _body_font(size=9)
@@ -1376,8 +1467,27 @@ def write_excel(bs: dict) -> str:
             cell.alignment = Alignment(horizontal="right")
             cell.font = Font(name="Calibri", bold=True, size=9.5)
             cell.border = _bottom_border()
+        r += 1
 
-        return r + 2
+        # Probable overpayment note — payments too large to be P&I
+        if over:
+            detail = "; ".join(
+                f"period {p}: ${v:,.2f} paid above filed liability" for p, v in sorted(over.items())
+            )
+            ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+            note = ws.cell(row=r, column=1, value=(
+                f"PROBABLE OVERPAYMENT (not P&I) — {detail}. Probable Comptroller "
+                "credit (duplicate-payment pattern). ACCOUNTANT INPUT: confirm via "
+                "Form 00-957 Statement of Account; refund via Form 00-985. "
+                "Not booked as an asset."
+            ))
+            note.font = Font(name="Calibri", bold=True, size=8.5, color="9C0006")
+            note.fill = _fill("F4B8B8")
+            note.alignment = Alignment(wrap_text=True, vertical="center")
+            ws.row_dimensions[r].height = 36
+            r += 1
+
+        return r + 1
 
     # Write all three tax types
     r = 4
@@ -1549,14 +1659,13 @@ def write_excel(bs: dict) -> str:
          "Void total $176,422.30 = 4.0% of gross POS. Cross-check: prior gross $4,427,384 − voids = $4,250,962 (matches BQ net). "
          "No adjustment needed but the void rate should be reviewed annually for IRS/Comptroller consistency."),
         ("3. Service charge exclusion",
-         "LOV3 levies a mandatory 20% service charge. Under IRS Rev. Rul. 2012-18 this is NOT gratuity — it is LOV3's revenue. "
-         "Service charges ARE included in net_price (MB or NON-MB bucket based on the parent item). "
-         "No adjustment needed; confirm with accountant that Comptroller receipts base also includes service charges."),
+         "Service charges and gratuities are excluded from sales revenue throughout this package. "
+         "No service-charge adjustment is made; tax-reporting treatment is deferred to BAED."),
         ("4. S&U quarterly vs monthly timing",
          "S&U filed quarterly (Q1=period 251; Q2=period 252) then monthly from Jul 2025. "
          "This tab distributes Q1/Q2 S&U evenly across 3 months for comparability. "
          "No adjustment — this is a presentation choice for this variance analysis only."),
-        ("5. MB step change (Flag 1)", MB_STEP_CHANGE_NARRATIVE),
+        ("5. Additional revenue over filed MB base (Flag 1)", MB_STEP_CHANGE_NARRATIVE),
         ("6. $59,175 legal order (RESOLVED)",
          "Debit 2025-08-25 reversed 2025-08-29, net = $0. "
          "RECOMMENDATION: if this was booked as OPEX in the 2025 P&L, reverse the entry. No balance sheet impact."),
@@ -1614,7 +1723,7 @@ def write_excel(bs: dict) -> str:
     # The six spec-required flags first, then the flags from build_balance_sheet()
     spec_flags = [
         ("SPEC FLAG 1",
-         "MB GR Step Change — Probable Under-Filing 10 of 12 Months",
+         "Additional Revenue Over Filed MB Base — 10 of 12 Months",
          MB_STEP_CHANGE_NARRATIVE),
         ("SPEC FLAG 2",
          "$59,175 Classification — RESOLVED",
@@ -1629,11 +1738,18 @@ def write_excel(bs: dict) -> str:
          "This is not an error — it is an accounting policy change. "
          "Accountant: document the change in the return notes / footnote."),
         ("SPEC FLAG 4",
-         "2024 K-1 Allocation Consistency",
-         "2024 K-1 shows Maurice Ragland at 15% ownership but allocated 100% of the $(35,161) loss. "
-         "For 2025 K-1s: confirm ownership percentages for all three partners "
-         "(Maurice 15% confirmed; Eddiele B Jasper and Derwin James unknown) "
-         "and apply consistent allocation methodology per the LLC operating agreement."),
+         "2024 K-1 Internal Inconsistencies — Reconcile Before 2025 K-1s",
+         "OWNERSHIP RESOLVED (owner-confirmed 2026-10-11): Eddiele B Jasper 45%, "
+         "Derwin James 40%, Maurice Ragland 15%. "
+         "The 2024 K-1s remain internally inconsistent against these percentages: "
+         "(1) Item J capital percentages as printed sum to 160% (15/45/100 — Derwin's "
+         "100% erroneous, correct is 40%); (2) the full $(35,161) loss is printed on "
+         "Line 1 of ALL THREE K-1s (triple-booked), while Item J loss % is 100% on "
+         "Derwin only; (3) Item L (capital account) is populated only on Derwin's K-1 "
+         "($0 + $585,000 - $35,161 = $549,839 — the full partnership capital, not a "
+         "1-partner share). "
+         "ACCOUNTANT: reconcile/amend the 2024 K-1s to the confirmed percentages "
+         "before preparing 2025 K-1s. Tax-basis capital is required on 2025 Item L."),
         ("SPEC FLAG 5",
          "Sales Tax Variance — Restate with Complete Data",
          "Prior analysis cited a $3,249 sales tax variance. "
@@ -1821,7 +1937,7 @@ def write_pdf(bs: dict) -> str:
         canvas_obj.setFillColor(BONE)
         canvas_obj.drawString(
             0.75 * inch, 0.45 * inch,
-            "LOV3 Restaurant & Lounge LLC — 2025 Adjusted Balance Sheet | CONFIDENTIAL — BAED Corporation / Sanchez Burnside",
+            f"LOV3 Restaurant & Lounge LLC — 2025 Adjusted Balance Sheet v{PACKAGE_VERSION} | CONFIDENTIAL — BAED Corporation / Sanchez Burnside",
         )
         canvas_obj.drawRightString(
             page_w - 0.75 * inch, 0.45 * inch,
@@ -1867,6 +1983,7 @@ def write_pdf(bs: dict) -> str:
         Paragraph(
             f"<b>As of:</b> December 31, 2025  &nbsp;|&nbsp; "
             f"<b>Basis:</b> Accrual  &nbsp;|&nbsp;  "
+            f"<b>Version:</b> {PACKAGE_VERSION} ({PACKAGE_VERSION_DATE})  &nbsp;|&nbsp;  "
             f"<b>Generated:</b> {ts}",
             STYLE_BODY,
         ),
@@ -1905,7 +2022,108 @@ def write_pdf(bs: dict) -> str:
     story.append(PageBreak())
 
     # ==================================================================
-    # PAGE 2 — Revenue Variance Summary
+    # PAGE 2 — Transmittal Memo
+    # ==================================================================
+    var_rows = _monthly_variance_table()
+    annual_toast_mb  = sum(r["toast_mb"]    for r in var_rows)
+    annual_toast_non = sum(r["toast_non_mb"] for r in var_rows)
+    annual_impl_mb   = sum(r["implied_mb_gr_receipts"]  for r in var_rows)
+    annual_impl_non  = sum(r["implied_su_receipts"]      for r in var_rows)
+    annual_var_mb    = round(annual_toast_mb  - annual_impl_mb,  2)
+    annual_var_non   = round(annual_toast_non - annual_impl_non, 2)
+
+    _over_2508 = probable_overpayments(MB_GR).get("2508", 0.0)
+    _distr_total = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
+
+    story += [
+        Paragraph("TRANSMITTAL MEMO", STYLE_EYEBROW),
+        Paragraph("To: Sanchez Burnside — BAED Corporation", STYLE_H1),
+        Paragraph(
+            f"<b>From:</b> Maurice Ragland, Lov3 Restaurant &amp; Lounge LLC  &nbsp;|&nbsp;  "
+            f"<b>Date:</b> {PACKAGE_VERSION_DATE}  &nbsp;|&nbsp;  "
+            f"<b>Re:</b> 2025 Adjusted Balance Sheet — K-1 Preparation Package, "
+            f"Version {PACKAGE_VERSION}",
+            STYLE_BODY,
+        ),
+        Spacer(1, 0.12 * inch),
+        Paragraph(
+            "This package supports preparation of the 2025 Form 1065, Schedule L, and partner K-1s. "
+            "It contains: (1) the adjusted balance sheet workbook "
+            "(LOV3_HTX_2025_Adjusted_Balance_Sheet.xlsx, four tabs); "
+            "(2) a reconciliation of all three Texas Comptroller tax accounts "
+            "(MB Gross Receipts, MB Sales, Sales &amp; Use) transcribed from WebFile filing histories; "
+            "and (3) this report, including the open-items list in Section 5. "
+            "Nothing in this package has been filed or booked — all adjustments await your review.",
+            STYLE_BODY,
+        ),
+        Spacer(1, 0.08 * inch),
+        Paragraph("Items referred to BAED for evaluation", STYLE_H2),
+        Paragraph(
+            f"<b>1. Additional revenue over the filed MB base.</b> Toast POS records reflect "
+            f"revenue above the base implied by filed MB returns in 10 of 12 months of 2025 — "
+            f"approximately {_pf(annual_var_mb)} in MB categories and {_pf(annual_var_non)} in "
+            f"non-MB categories. This excess is presented as additional revenue, with no "
+            f"characterization of cause. LOV3 operates under a single TABC Mixed Beverage permit. "
+            f"Detail in Section 1.",
+            STYLE_BODY,
+        ),
+        Paragraph(
+            f"<b>2. Probable Comptroller overpayment credit — MB GR period 2508.</b> Two payments "
+            f"($23,216.41 + $23,246.41) were made against a filed liability of $22,110.87, an "
+            f"excess of {_pf(_over_2508)}. We recommend requesting a Statement of Account "
+            f"(Form 00-957) to confirm the credit and, if confirmed, a refund claim (Form 00-985). "
+            f"Not booked as an asset or expense in this package.",
+            STYLE_BODY,
+        ),
+        Paragraph(
+            "<b>3. Service charges.</b> Service charges and gratuities are excluded from sales "
+            "revenue throughout this package; the staff share is passed to staff through payroll. "
+            "Tax-reporting treatment is deferred to BAED.",
+            STYLE_BODY,
+        ),
+        Spacer(1, 0.08 * inch),
+        Paragraph("Inputs required from BAED before the balance sheet is final", STYLE_H2),
+        Paragraph(
+            "<b>1. 2024 K-1 reconciliation.</b> Ownership is owner-confirmed: Eddiele B Jasper "
+            "45%, Derwin James 40%, Maurice Ragland 15%. The 2024 K-1s as printed are "
+            "internally inconsistent against these percentages (Item J sums to 160%; the full "
+            "$(35,161) loss is printed on all three K-1s; Item L appears only on one) and should "
+            "be reconciled or amended before the 2025 K-1s are issued. Tax-basis capital is "
+            "required on 2025 Item L.",
+            STYLE_BODY,
+        ),
+        Paragraph(
+            f"<b>2. Per-partner distribution classification.</b> Total 2025 owner distributions of "
+            f"{_pf(_distr_total)} (bank data) are attributed to Eddie Jasper for K-1 Line 19A "
+            f"(owner-confirmed 2026-10-11; all bank cards are LOV3 business cards; Maurice and "
+            f"Derwin $0 unless partner records show otherwise). BAED to classify the "
+            f"discretionary/travel components (§707(c) guaranteed payment vs. §162 expense vs. "
+            f"distribution).",
+            STYLE_BODY,
+        ),
+        Paragraph(
+            "<b>3. Accrued payroll.</b> Wages for Dec 29–31, 2025 (paid January 2026), including "
+            "the staff service-charge share passed through payroll. Hours available from the "
+            "Toast Labor API.",
+            STYLE_BODY,
+        ),
+        Paragraph(
+            f"<b>4. Remaining book balances.</b> Cash, 2025 net income, depreciation, and accounts "
+            f"payable. Once supplied, the unreconciled difference "
+            f"({_money(bs['unreconciled_difference'])}) collapses to $0.",
+            STYLE_BODY,
+        ),
+        Spacer(1, 0.08 * inch),
+        Paragraph(
+            "All ACCOUNTANT INPUT cells are highlighted yellow in the workbook. Please direct "
+            "questions to Maurice Ragland.",
+            STYLE_NOTE,
+        ),
+    ]
+    story.append(PageBreak())
+
+    # ==================================================================
+    # PAGE 3 — Revenue Variance Summary
     # ==================================================================
     story += [
         Paragraph("SECTION 1", STYLE_EYEBROW),
@@ -1920,14 +2138,6 @@ def write_pdf(bs: dict) -> str:
             STYLE_LEAD,
         ),
     ]
-
-    var_rows = _monthly_variance_table()
-    annual_toast_mb  = sum(r["toast_mb"]    for r in var_rows)
-    annual_toast_non = sum(r["toast_non_mb"] for r in var_rows)
-    annual_impl_mb   = sum(r["implied_mb_gr_receipts"]  for r in var_rows)
-    annual_impl_non  = sum(r["implied_su_receipts"]      for r in var_rows)
-    annual_var_mb    = round(annual_toast_mb  - annual_impl_mb,  2)
-    annual_var_non   = round(annual_toast_non - annual_impl_non, 2)
 
     story.append(Paragraph("Annual Totals", STYLE_H2))
     annual_summary = [
@@ -1972,10 +2182,10 @@ def write_pdf(bs: dict) -> str:
          "S&U was filed quarterly for H1 2025 (Q1 = period 251, Q2 = period 252). "
          "Monthly variances in Jan–Jun reflect equal distribution of the quarterly filing across 3 months. "
          "The annual total is precise."),
-        ("MB step change — probable under-filing", MB_STEP_CHANGE_NARRATIVE),
+        ("Additional revenue over filed MB base", MB_STEP_CHANGE_NARRATIVE),
         ("Service charges",
-         "Mandatory 20% service charge is LOV3 revenue (IRS Rev. Rul. 2012-18, not gratuity). "
-         "Included in net_price and likely included in Comptroller receipts. No adjustment needed."),
+         "Service charges and gratuities are excluded from sales revenue throughout this package. "
+         "No service-charge adjustment is made; tax-reporting treatment is deferred to BAED."),
         ("Hookah (Predictive Insights)",
          "Monthly bank deposits from Predictive Insights LLC (hookah operator, May 2025+) "
          "do not appear in Toast net_price. Accountant must confirm Comptroller treatment."),
@@ -2076,26 +2286,42 @@ def write_pdf(bs: dict) -> str:
         ),
     ]
 
+    def _cell(text):
+        return Paragraph(text, STYLE_SMALL)
+
+    _mbgr_annual = _pf(sum(period_liabilities(MB_GR).values()))
+    _dist_total = _pf(abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"]))
     adj_rows = [
         ["#", "Debit Account", "Credit Account", "Approximate Amount", "Description"],
-        ["1", "Taxes & Licenses (OPEX)",  "MB Gross Receipts Tax Payable",
-         _pf(sum(period_liabilities(MB_GR).values())),
-         "Accrue 2025 MB GR expense if not already in P&L"],
-        ["2", "MB Sales Tax Payable",      "Cash / Bank",
+        ["1", _cell("None — verification only"), _cell("None — verification only"),
+         _mbgr_annual,
+         _cell(f"VERIFY the 2025 P&L already includes the full-year MB GR expense "
+               f"({_mbgr_annual}, Taxes &amp; Licenses) — do NOT book it again. "
+               f"The balance-sheet item is the year-end payable of {_pf(tp_mbgr)} "
+               "(periods 2511 + 2512), already included in Taxes Payable.")],
+        ["2", _cell("MB Sales Tax Payable"), _cell("Cash / Bank"),
          "As remitted",
-         "Reclassify MB Sales Tax from revenue to liability (pass-through)"],
-        ["3", "Sales & Use Tax Payable",   "Cash / Bank",
+         _cell("Reclassify MB Sales Tax from revenue to liability (pass-through)")],
+        ["3", _cell("Sales &amp; Use Tax Payable"), _cell("Cash / Bank"),
          "As remitted",
-         "Reclassify S&U Tax from revenue to liability (pass-through)"],
-        ["4", "Prior OPEX / Legal Expense", "Cash / Reversal",
+         _cell("Reclassify S&amp;U Tax from revenue to liability (pass-through)")],
+        ["4", _cell("Prior OPEX / Legal Expense"), _cell("Cash / Reversal"),
          _pf(59175.0),
-         "Reverse $59,175 legal hold expense if booked (hold was reversed 2025-08-29, net = $0)"],
-        ["5", "Cash / Receivable",          "Hookah Revenue",
+         _cell("Reverse $59,175 legal hold expense if booked "
+               "(hold was reversed 2025-08-29, net = $0)")],
+        ["5", _cell("Cash / Receivable"), _cell("Hookah Revenue"),
          "TBD",
-         "Record Predictive Insights LLC monthly hookah deposits as additive revenue (not in Toast POS)"],
-        ["6", "Owner Distributions",        "Cash / Partners' Capital",
-         _pf(abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])),
-         f"Confirm BQ bank-category total ({_pf(abs(BQ_RESULTS['owner_distributions_2025']['combined_owner_attributable']))}) reconciles to K-1 distributions before filing"],
+         _cell("Record Predictive Insights LLC monthly hookah deposits as additive "
+               "revenue (not in Toast POS)")],
+        ["6", _cell("Owner Distributions"), _cell("Cash / Partners' Capital"),
+         _dist_total,
+         _cell(f"Confirm BQ bank-category total ({_dist_total}) reconciles to K-1 "
+               "distributions before filing; split by partner for Line 19A")],
+        ["7", _cell("No entry until confirmed"), _cell("—"),
+         _pf(24351.95),
+         _cell("Probable MB GR 2508 overpayment credit (period paid twice) — confirm "
+               "via Form 00-957 Statement of Account; refund via Form 00-985. "
+               "Do NOT book as expense or asset until confirmed.")],
     ]
     tbl_adj = Table(adj_rows,
                     colWidths=[body_w * 0.04, body_w * 0.20, body_w * 0.20,
@@ -2136,7 +2362,13 @@ def write_pdf(bs: dict) -> str:
          "No AP sub-ledger available. Confirm outstanding vendor invoices at 12/31/2025."],
         ["Accrued Payroll",
          "$0",
-         "No payroll accrual data. Confirm pay-period cutoff vs 12/31/2025."],
+         "Wages earned Dec 29-31, 2025 paid in Jan 2026, including the staff share "
+         "of service charges (passed to staff through payroll). Source: Toast Labor "
+         "API time entries x wage rates plus the Jan-2026 payroll register."],
+        ["Contingency Evaluation (ASC 450)",
+         "Deferred to BAED",
+         "Evaluate whether the additional-revenue variance over filed MB amounts "
+         "requires any accrual or disclosure. No amount asserted in this package."],
         ["Capital Contributions 2025",
          "$0",
          "No contribution records. Confirm with bank records and partner agreements."],
@@ -2147,13 +2379,22 @@ def write_pdf(bs: dict) -> str:
          "$32,191 (2024 balance)",
          "Physical count at 12/31/2025 required."],
         ["Partner Ownership %",
-         "Maurice 15% (confirmed)",
-         "Eddiele B Jasper and Derwin James % unknown. "
-         "Confirm from LLC operating agreement before K-1 income allocation."],
+         "Eddie 45% / Derwin 40% / Maurice 15%",
+         "Owner-confirmed 2026-10-11 (sums to 100%). The 2024 K-1s as printed "
+         "(Item J sums to 160%; $(35,161) loss on all three K-1s) remain internally "
+         "inconsistent — reconcile/amend 2024 K-1s to these percentages before 2025 "
+         "K-1 allocation."],
         ["Owner Distributions — reconciliation",
          "$225,496 (BQ bank)",
          "Prior SBA P&L showed $231,907 (delta ~$6,411). "
          "Reconcile to K-1 distribution amount; check Credit Card Payments / Admin & Office buckets."],
+        ["Per-Partner Distribution Split",
+         "Eddie Jasper — 100%",
+         "Owner directive 2026-10-11: 2025 draws are considered Eddie's (all bank cards "
+         "are LOV3 business cards). Full $225,496.37 to Eddie's Line 19A; Maurice and "
+         "Derwin $0 unless partner records show otherwise. Classify Discretionary ($43,676) "
+         "and Travel ($9,413): distribution, Sec. 162 expense, or Sec. 707(c) guaranteed "
+         "payment."],
     ]
     tbl_open = Table(open_items,
                      colWidths=[body_w * 0.25, body_w * 0.20, body_w * 0.55])

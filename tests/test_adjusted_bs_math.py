@@ -4,6 +4,7 @@ from adjusted_balance_sheet_2025 import (
     implied_receipts, match_legal_order, MB_GR, MB_SALES, SALES_USE, BQ_RESULTS,
     build_balance_sheet, timely_filer_discounts, _period_balances, _is_timely_discount,
     TIMELY_FILER_DISCOUNT_RATE, TIMELY_FILER_TOLERANCE,
+    probable_overpayments, OVERPAYMENT_THRESHOLD,
 )
 
 
@@ -30,6 +31,40 @@ def test_taxes_payable_at_yearend_is_2511_plus_2512():
 def test_penalties_and_interest_positive_delta():
     pi = penalties_and_interest(MB_SALES)
     assert pi["2501"] == round(5671.79 - 5354.09, 2)   # 317.70
+
+
+def test_mb_gr_2508_duplicate_payment_is_overpayment_not_pi():
+    """MB GR 2508 paid twice (23,216.41 + 23,246.41 vs 22,110.87 filed):
+    the $24,351.95 excess is a probable Comptroller credit, not P&I."""
+    over = probable_overpayments(MB_GR)
+    assert over["2508"] == round(23216.41 + 23246.41 - 22110.87, 2)  # 24,351.95
+    assert "2508" not in penalties_and_interest(MB_GR)
+
+
+def test_mb_sales_2508_small_excess_stays_pi():
+    """MB Sales 2508 excess (1,361.30 = 5% of 27,226.07) is plausible P&I."""
+    assert penalties_and_interest(MB_SALES)["2508"] == round(28587.37 - 27226.07, 2)
+    assert "2508" not in probable_overpayments(MB_SALES)
+
+
+def test_overpayment_threshold_boundary_synthetic():
+    rows = [
+        ("return", "2025-02-20", "r1", "2501", "2025-01-31", 100.00, False),
+        ("payment", "2025-02-20", "p1", "2501", "2025-01-31", 114.99, False),
+        ("return", "2025-03-20", "r2", "2502", "2025-02-28", 100.00, False),
+        ("payment", "2025-03-20", "p2", "2502", "2025-02-28", 220.00, False),
+    ]
+    assert penalties_and_interest(rows) == {"2501": 14.99}
+    assert probable_overpayments(rows) == {"2502": 120.00}
+    assert OVERPAYMENT_THRESHOLD == 0.15
+
+
+def test_balance_sheet_flags_comptroller_credit():
+    bs = build_balance_sheet()
+    credit_flags = [f for f in bs["flags"] if "comptroller_credit" in f]
+    assert len(credit_flags) == 1
+    assert "24,351.95" in credit_flags[0]
+    assert "Not booked as an asset" in credit_flags[0]
 
 
 def test_implied_receipts_divides_by_rate():

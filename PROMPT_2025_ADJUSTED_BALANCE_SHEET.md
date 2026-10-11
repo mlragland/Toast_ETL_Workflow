@@ -11,7 +11,7 @@
 **Entity:** LOV3 Restaurant & Lounge LLC (dba LOV3|HTX), Houston TX
 **Purpose:** Accrual-basis 12/31/2025 balance sheet for K-1 preparation
 **Accountant:** Sanchez Burnside, BAED Corporation
-**Partners:** Maurice Ragland (15% capital, confirmed via 2024 K-1); Eddiele B Jasper and Derwin James Jr (ownership % unknown — ACCOUNTANT INPUT)
+**Partners:** Eddiele B Jasper **45%**, Derwin James Jr. **40%**, Maurice Ragland **15%** (owner-confirmed 2026-10-11; sums to 100%). The **2024 K-1s as printed remain internally inconsistent** against these percentages (Item J capital sums to 160%: 15/45/100 — Derwin's printed 100% erroneous; the $(35,161) loss is printed in full on all three K-1s; Item L populated only on Derwin's) — BAED must reconcile/amend the 2024 K-1s to the confirmed percentages before 2025 K-1s are prepared.
 **Basis:** Accrual (consistent with the 2024 Form 1065 and accepted SBA P&L)
 
 This is a **standalone script**, NOT part of the Flask/Cloud Run app. It has no Flask imports and produces two output files in the repo root.
@@ -126,13 +126,16 @@ $29,457.49 total (periods 2511 + 2512 across all three accounts; payments filed 
 - Voided 2025 items: $176,422.30 (MB $159,144.23 + NON-MB $17,278.07) — tracked separately, not in revenue
 - Cross-check: $4,250,961.87 + $176,422.30 = $4,427,384.17 (matches prior gross)
 
-### Comptroller Validation Finding (Critical)
-**Jul–Aug 2025 (periods 2507–2508) filed MB base matches Toast POS to the dollar (variance <$6)** — this validates the comparison method.
+### Toast-vs-Comptroller Comparison (Critical)
+**Jul–Aug 2025 (periods 2507–2508) filed MB base matches Toast POS to the dollar (variance <$6).**
 
-**Probable under-filing 10 of 12 months:** Jan–Jun AND Sep–Dec filed liabilities imply only ~$28–80K/mo vs Toast $230–350K/mo. The ~$2.18M MB base and ~$442K non-MB base discrepancy is consistent with the struck/amended 2504–2505 returns and a mid-2025 Comptroller correction that did not persist after August. **Refer to BAED; consider amended Comptroller returns. ACCOUNTANT REVIEW REQUIRED before any revenue adjustment is booked.**
+**Additional revenue over filed MB base, 10 of 12 months:** Jan–Jun and Sep–Dec filed liabilities imply ~$28–80K/mo vs Toast $230–350K/mo. The excess — ~$2.18M (MB categories) and ~$442K (non-MB categories) — is presented as **additional revenue**, with no characterization of cause. Amended/struck returns exist for 2504–2505. LOV3 operates under a single TABC Mixed Beverage permit. Service charges are excluded from sales revenue throughout this package. **Referred to BAED for evaluation. ACCOUNTANT REVIEW REQUIRED before any revenue adjustment is booked.**
 
 ### $59,175 Legal Order
 Confirmed net zero — see Decision 3 above.
+
+### Probable Comptroller Overpayment Credit — MB GR period 2508
+MB GR 2508 was paid twice ($23,216.41 on 2025-10-02 + $23,246.41 on 2025-10-14) against a filed liability of $22,110.87 — excess **$24,351.95**. The first payment's $1,105.54 excess equals exactly 5% statutory late penalty; the second payment appears to be a duplicate. This is a **probable Comptroller credit (asset), NOT penalties-and-interest expense**. Not booked (placeholder $0). **ACCOUNTANT INPUT: confirm via Form 00-957 Statement of Account; request refund via Form 00-985.** Code: `probable_overpayments()` splits payment variances > 15% of liability (`OVERPAYMENT_THRESHOLD`) from plausible P&I.
 
 ### Owner Distributions
 BQ bank-category total 2025: $225,496.37 (Owner Draws/Transfers $172,406.51 + Discretionary $43,676.41 + Travel $9,413.45). Prior SBA P&L showed $231,907 — delta ~$6,411 likely in uncategorized rows or miscategorized credit card payments. **ACCOUNTANT INPUT: reconcile before filing K-1s.**
@@ -149,11 +152,14 @@ All of the following are set to $0 or a prior-year carry-forward in the current 
 | Net Income 2025 | $0 | From `LOV3_HTX_Financial_Statements_SBA.xlsx` |
 | 2025 Depreciation | $0 | From fixed-asset schedule |
 | Accounts Payable | $0 | Confirm vendor invoices outstanding 12/31/2025 |
-| Accrued Payroll | $0 | Confirm pay-period cutoff vs 12/31/2025 |
+| Accrued Payroll | $0 | Wages earned Dec 29–31 2025 paid Jan 2026, incl. staff share of service charges (passed to staff through payroll) — Toast Labor API (`toast_labor_pull.py --start 20251229 --end 20251231`) × wage rates plus Jan-2026 payroll register |
+| Contingency Evaluation (ASC 450) | Deferred to BAED | Evaluate whether the additional-revenue variance requires any accrual or disclosure; no amount asserted in this package |
 | Capital Contributions 2025 | $0 | From bank records and partner agreements |
 | Accounts Receivable 2025 | $373,592 (2024) | Confirm: collect, write-off, or reclassify |
 | Inventory 2025 | $32,191 (2024) | Physical count at 12/31/2025 |
-| Partner Ownership % | Maurice 15% only | Eddiele B Jasper and Derwin James from LLC op agreement |
+| Partner Ownership % | Eddie 45% / Derwin 40% / Maurice 15% (owner-confirmed 2026-10-11) | Reconcile/amend 2024 K-1s (Item J summed to 160%) to these percentages before 2025 K-1 allocation |
+| Per-Partner Distribution Split | Eddie Jasper 100% ($225,496.37) | Owner directive 2026-10-11: all bank cards (*1201, *1370) are LOV3 business cards; 2025 draws attributed to Eddie — full amount to his Line 19A, Maurice/Derwin $0 unless partner records show otherwise. Classify Discretionary $43,676 / Travel $9,413 as distribution, §162 expense, or §707(c) guaranteed payment |
+| Comptroller Credit (MB GR 2508) | $0 (flagged, not booked) | Confirm $24,351.95 overpayment via Form 00-957; refund via Form 00-985 |
 
 The `unreconciled_difference` plug ($123,604.88 with current placeholders) forces the sheet to balance; it reaches $0 when all ACCOUNTANT INPUT items are resolved.
 
@@ -208,7 +214,8 @@ ls -lh "$DEST/"
 
 - NEVER commit `LOV3_HTX_2025_Adjusted_Balance_Sheet.xlsx` or `LOV3_2025_Adjusted_Balance_Sheet_Leadership_Report.pdf` to git (they are untracked, regenerated each run)
 - NEVER restate numbers accepted in prior lender submissions (Lender Consistency Rule) — refinements go in Assumptions & Flags, not the primary statement
-- NEVER call the MB under-filing finding "confirmed fraud" — frame as "pattern signal under review" until BAED closes the investigation
+- NEVER characterize the Toast-vs-Comptroller variance as "under-filing" or "fraud" — present it as "additional revenue over the filed MB base, referred to BAED" (owner directive 2026-10-10)
+- NEVER include service charges or gratuities in sales revenue (owner directive 2026-10-10)
 - NEVER adjust `BEGINNING_BALANCES` without a confirmed 2024 Schedule L source — those numbers come from the 2024 Form 1065 filed return
 - NEVER net MB GR (6.7%) from revenue — it is LOV3's own operating expense and belongs in Taxes & Licenses
 - NEVER mark collected taxes (MB Sales 8.25%, S&U 8.25%) as revenue — they are pass-through liabilities
