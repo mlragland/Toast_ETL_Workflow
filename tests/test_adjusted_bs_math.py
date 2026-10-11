@@ -342,3 +342,59 @@ def test_balance_sheet_flags_service_charge_tieout_and_off_pos_revenue():
     assert "OFF-POS REVENUE" in joined
     total = round(sum(OFF_POS_REVENUE_2025.values()), 2)
     assert f"${total:,.2f}" in joined
+
+
+# v2.3 — resolved inputs: inventory (BevSpot), cash (ledger chain), accrued payroll
+
+def test_inventory_uses_bevspot_year_end_count():
+    from adjusted_balance_sheet_2025 import INVENTORY_1231_2025
+    bs = build_balance_sheet()
+    assert INVENTORY_1231_2025 == 29377.00
+    assert bs["assets"]["inventory"] == INVENTORY_1231_2025
+
+
+def test_cash_uses_verified_closing_ledger_balance():
+    from adjusted_balance_sheet_2025 import CASH_1231_2025
+    bs = build_balance_sheet()
+    assert CASH_1231_2025 == -473.97
+    assert bs["assets"]["cash"] == CASH_1231_2025
+    # 1/2/2026 opening chain: 28,775.07 - 29,249.04 = -473.97
+    assert round(28775.07 - 29249.04, 2) == CASH_1231_2025
+
+
+def test_accrued_payroll_components_sum():
+    from adjusted_balance_sheet_2025 import (
+        ACCRUED_PAYROLL_1231_2025, ACCRUED_PAYROLL_1231_2025_TOTAL)
+    ap = ACCRUED_PAYROLL_1231_2025
+    assert ACCRUED_PAYROLL_1231_2025_TOTAL == round(sum(ap.values()), 2) == 15084.56
+    # FICA estimate = 7.65% of wages + svc charge + tips
+    base = ap["hourly_wages"] + ap["service_charge_passthrough"] + ap["cc_tips_passthrough"]
+    assert abs(ap["employer_fica_est"] - round(base * 0.0765, 2)) < 0.02
+    bs = build_balance_sheet()
+    assert bs["liabilities"]["accrued_payroll"] == ACCRUED_PAYROLL_1231_2025_TOTAL
+
+
+def test_balance_sheet_still_ties_after_v23_inputs():
+    bs = build_balance_sheet()
+    a, l = bs["total_assets"], bs["total_liabilities"]
+    assert round(a - l - bs["total_equity"], 2) == 0.0
+
+
+# --- v2.4: accounts payable estimate (owner-directed 2026-10-11) ------------
+
+def test_accounts_payable_estimate_components_sum():
+    from adjusted_balance_sheet_2025 import (
+        ACCOUNTS_PAYABLE_1231_2025, ACCOUNTS_PAYABLE_1231_2025_TOTAL)
+    apay = ACCOUNTS_PAYABLE_1231_2025
+    assert apay["derived_trade_ap"] == 19275.37
+    assert apay["credit_cards_due"] == 30000.00
+    assert apay["liquor_due"] == 20000.00
+    assert ACCOUNTS_PAYABLE_1231_2025_TOTAL == round(sum(apay.values()), 2) == 69275.37
+    bs = build_balance_sheet()
+    assert bs["liabilities"]["accounts_payable"] == ACCOUNTS_PAYABLE_1231_2025_TOTAL
+
+
+def test_balance_sheet_still_ties_after_v24_inputs():
+    bs = build_balance_sheet()
+    a, l = bs["total_assets"], bs["total_liabilities"]
+    assert round(a - l - bs["total_equity"], 2) == 0.0

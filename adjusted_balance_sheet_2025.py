@@ -20,7 +20,7 @@ from itertools import combinations
 # they are holding. Bump on any re-issue.
 # ---------------------------------------------------------------------------
 
-PACKAGE_VERSION = "2.1"
+PACKAGE_VERSION = "2.4"
 PACKAGE_VERSION_DATE = "2026-10-11"
 
 # ---------------------------------------------------------------------------
@@ -783,6 +783,67 @@ DISTRIBUTIONS_2025_RECONCILED = round(
 # 2026-10-11 (LOV3 is guarantor on the VIC3 construction loan) — NOT capitalized.
 FIXED_ASSET_ADDITIONS_2025 = 48082.31
 
+# 12/31/2025 ending inventory — BevSpot finalized physical count 2025-12-29
+# ($29,377, 212 items, finalized by Ashley Baines; BevSpot weekly summary
+# email 2026-01-05, maurice.ragland@lov3htx.com).  Zero purchases received
+# between the count and 12/31 (next deliveries Fri 1/2/2026, $10,993), so the
+# 12/29 count is the closest documented value to year-end.  BevSpot covers
+# bar inventory (liquor/beer/bar supplies + select kitchen items).
+INVENTORY_1231_2025 = 29377.00
+
+# 12/31/2025 cash — BofA x5815 CLOSING ledger balance, verified 2026-10-11 by
+# chaining running balances in BankTransactions_raw (stmt-14.csv): the final
+# 12/31 postings (Tony's Bar Supply -1,209.81, Brinks -87.67, wire fee -30.00,
+# two $10 overdraft fees "FOR ACTIVITY OF 12-31") chain to -473.97, and the
+# first 1/2/2026 posting opens from it (28,775.07 - 29,249.04 = -473.97).
+# NOT an intraday low: BofA charged overdraft fees for 12/31 activity, i.e.
+# the bank itself closed the day overdrawn.  Cause: $71,212.57 Choice Employer
+# payroll wire out 12/31 12:57 ET (funding the pay period ended Sun 12/28).
+CASH_1231_2025 = -473.97
+
+# Accrued payroll at 12/31/2025 — wages/svc-charge/tips earned Dec 29-31
+# (bi-weekly period 12/29-1/11, funded by the 1/14/2026 Choice wire of
+# $75,894.02; the prior period ended 12/28 was funded by the 12/31 wire).
+# LOV3 closed Mon 12/29; business days 12/30 (Tue) and 12/31 (Wed, NYE).
+# Sources: LaborTimeEntries_raw (hours x hourly_wage, OT at 1.5x) and
+# PaymentDetails_raw (gratuity = service charge, tip = CC tips; voided
+# excluded; 4 AM business-day cutoff).  Employer FICA estimated at 7.65% of
+# (wages + svc charge + tips); Choice invoice has the exact burden.
+ACCRUED_PAYROLL_1231_2025 = {
+    "hourly_wages":        4251.27,  # 12/30: 1,426.78 + 12/31: 2,824.49
+    "service_charge_passthrough": 7101.21,  # 12/30: 1,316.10 + 12/31: 5,785.11
+    "cc_tips_passthrough": 2660.12,  # 12/30: 628.76 + 12/31: 2,031.36
+    "employer_fica_est":   1071.96,  # 7.65% x 14,012.60
+}
+ACCRUED_PAYROLL_1231_2025_TOTAL = round(sum(ACCRUED_PAYROLL_1231_2025.values()), 2)  # 15,084.56
+
+# Accounts payable at 12/31/2025 — ESTIMATE (owner-directed 2026-10-11), built
+# from the Jan 1-14, 2026 BofA payment flow (BankTransactions_raw) using each
+# vendor's known payment lag to infer December-incurred obligations:
+#   derived_trade_ap 19,275.37 =
+#     Tony K's liquor Fintech 1/2 1,819.84 + Bar Solutions card dated 12/31
+#     128.00 + Verizon 619.18 + Comcast 722.55 (both arrears Dec service)
+#     + Toast POS fees 1/8 1,882.35 + BAED prof services 1/8 2,412.39
+#     + ScentAir 1/5 745.84 + Gordon Food Service first-week payments 2,804.90
+#     + Dec-written checks #1115-1125 cleared 1/2-1/6 6,140.22 (bussers
+#     3,240.22 + DJ/entertainment) + Lewis Security NYE-week Dec portion
+#     ~2,000.10 (50% of the 1/5 transfer).
+#   credit_cards_due 30,000.00 — owner estimate of card balances outstanding
+#     at 12/31 (the 1/12/2026 $8,000 paydown to CRD 4314 confirms a balance
+#     existed; Dec card statements will pin the exact figure).
+#   liquor_due 20,000.00 — owner estimate of additional liquor invoices
+#     outstanding at 12/31 beyond the Fintech stragglers captured above.
+# Excluded to avoid double-count: Choice payroll wire 1/14 (in accrued
+# payroll), WebFile taxes 1/6 $15,967.34 (in taxes_payable), Fourth Fintech
+# tips 1/8 (in accrued payroll), January rent paid in advance, Jan 6-7 liquor
+# payments ~$11,758 (match the 1/2/2026 BevSpot deliveries $10,993).
+ACCOUNTS_PAYABLE_1231_2025 = {
+    "derived_trade_ap": 19275.37,
+    "credit_cards_due": 30000.00,
+    "liquor_due":       20000.00,
+}
+ACCOUNTS_PAYABLE_1231_2025_TOTAL = round(sum(ACCOUNTS_PAYABLE_1231_2025.values()), 2)  # 69,275.37
+
 # ---------------------------------------------------------------------------
 # 2025 Service Charge tie-out (owner directives 2026-10-11: tie the service
 # charge paid through payroll to the top line, shown as a pass-through; the
@@ -845,13 +906,23 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
     # ASSETS
     # ------------------------------------------------------------------
 
-    # Cash — BQ stmt-14.csv shows an intraday low on 12/31 after payroll wire;
-    # value is unreliable.  Accountant must supply Dec-2025 BofA closing balance.
-    cash = 0.0
+    # Cash — BofA x5815 closing ledger balance at 12/31/2025, verified by
+    # chaining running balances (see CASH_1231_2025 comment).  The account
+    # closed the year overdrawn after the 12/31 payroll wire.
+    cash = CASH_1231_2025  # -473.97
     flags.append(
-        "ACCOUNTANT INPUT — cash: BQ shows -$473.97 (intraday low after $71K "
-        "payroll wire on 12/31/2025); use Dec-2025 BofA statement closing balance. "
-        "Placeholder: $0."
+        "RESOLVED — cash: 12/31/2025 BofA x5815 CLOSING ledger balance "
+        f"${cash:,.2f} (overdrawn), verified by chaining running balances in "
+        "BankTransactions_raw: the final 12/31 postings chain to -473.97 and "
+        "the first 1/2/2026 posting opens from it (28,775.07 - 29,249.04). "
+        "BofA charged two $10 overdraft fees for 12/31 activity, confirming "
+        "the day closed negative. Cause: $71,212.57 Choice Employer payroll "
+        "wire out 12/31. GAAP presentation: BAED may reclassify the book "
+        "overdraft to a current liability (cash $0 / bank overdraft $473.97) "
+        "on Schedule L. Cross-check against the Dec-2025 BofA paper statement. "
+        "NOTE: covers the operating account only — confirm no year-end "
+        "balances in CHK 0227 / CHK 9121 reserve accounts belong on the LOV3 "
+        "balance sheet."
     )
 
     # Accounts Receivable — carrying 2024 Schedule L ending balance forward.
@@ -865,12 +936,17 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         "receivable or related-party balance. Confirm 2025 year-end treatment."
     )
 
-    # Inventory — carrying 2024 Schedule L ending balance forward.
-    # Physical count at 12/31/2025 required.
-    inventory = BEGINNING_BALANCES["inventory"]  # 32,191
+    # Inventory — BevSpot finalized physical count 12/29/2025 (closest to
+    # year-end; no purchases received between the count and 12/31).
+    inventory = INVENTORY_1231_2025  # 29,377
     flags.append(
-        "ACCOUNTANT INPUT — inventory: carrying 2024 Schedule L ending balance of "
-        f"${inventory:,.2f} forward. Confirm with 12/31/2025 physical count."
+        "RESOLVED — inventory: 12/31/2025 ending inventory set to "
+        f"${inventory:,.2f} per BevSpot finalized physical count 12/29/2025 "
+        "(212 items, finalized by Ashley Baines). Zero purchases received "
+        "between the count and 12/31 (next deliveries 1/2/2026). BevSpot covers "
+        "bar inventory; confirm no material non-bar stock at year-end. "
+        f"Replaces the 2024 Schedule L carry-forward of "
+        f"${BEGINNING_BALANCES['inventory']:,.2f}."
     )
 
     # Fixed Assets — 2024 Schedule L gross amount plus 2025 additions from the
@@ -974,25 +1050,44 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
                 "(Texas Comptroller timely-filing discount per Tax Code § 151.423)."
             )
 
-    # Accounts Payable — no AP sub-ledger available; placeholder 0.
-    accounts_payable = 0.0
+    # Accounts Payable — ESTIMATE from Jan 2026 payment flow + owner inputs.
+    accounts_payable = ACCOUNTS_PAYABLE_1231_2025_TOTAL  # 69,275.37
+    apay = ACCOUNTS_PAYABLE_1231_2025
     flags.append(
-        "ACCOUNTANT INPUT — accounts_payable: no AP sub-ledger available. "
-        "Placeholder $0. Confirm with vendor invoices outstanding at 12/31/2025."
+        "ESTIMATE — accounts_payable: no AP sub-ledger; estimated at "
+        f"${accounts_payable:,.2f} = derived trade AP ${apay['derived_trade_ap']:,.2f} "
+        "(Jan 1-14, 2026 BofA payments inferred as December-incurred via vendor "
+        "payment lags: Fintech liquor straggler, arrears utilities, Toast POS "
+        "fees, BAED, ScentAir, GFS first-week, Dec-written checks #1115-1125, "
+        "Lewis Security NYE-week Dec portion) + credit cards due "
+        f"${apay['credit_cards_due']:,.2f} (owner estimate 2026-10-11; the "
+        "1/12/2026 $8,000 CRD 4314 paydown confirms a balance existed) "
+        f"+ liquor invoices due ${apay['liquor_due']:,.2f} (owner estimate "
+        "2026-10-11). Double-counts excluded: payroll wire (accrued payroll), "
+        "WebFile taxes (taxes_payable), Fourth Fintech tips (accrued payroll), "
+        "January rent in advance, Jan 6-7 liquor payments matching the "
+        "1/2/2026 BevSpot deliveries. BAED to replace with actual vendor "
+        "invoices + Dec card statements when available."
     )
 
-    # Accrued Payroll — pay period spanning 12/31/2025 (Wed); wages earned
-    # Dec 29-31 were paid in Jan 2026.  Includes the staff share of service
-    # charges, which is passed directly to staff through payroll.  Placeholder 0.
-    accrued_payroll = 0.0
+    # Accrued Payroll — derived from LaborTimeEntries_raw + PaymentDetails_raw
+    # for business days 12/30-12/31 (period 12/29-1/11, paid via 1/14/2026 wire).
+    accrued_payroll = ACCRUED_PAYROLL_1231_2025_TOTAL  # 15,084.56
+    ap = ACCRUED_PAYROLL_1231_2025
     flags.append(
-        "ACCOUNTANT INPUT — accrued_payroll: wages earned Dec 29-31, 2025 "
-        "(12/31 was a Wednesday mid-pay-period) were paid in Jan 2026 and belong "
-        "on this balance sheet under accrual basis. Includes the staff share of "
-        "service charges for those days (passed directly to staff through payroll). "
-        "Placeholder $0. Source: Toast Labor API time entries "
-        "(toast_labor_pull.py --start 20251229 --end 20251231) x wage rates plus "
-        "the payroll register for the period paid in Jan 2026."
+        "RESOLVED — accrued_payroll: wages earned Dec 29-31, 2025 (paid via the "
+        f"1/14/2026 Choice Employer wire of $75,894.02) = ${accrued_payroll:,.2f}: "
+        f"hourly wages ${ap['hourly_wages']:,.2f} (LaborTimeEntries_raw, OT at 1.5x) "
+        f"+ service-charge pass-through ${ap['service_charge_passthrough']:,.2f} "
+        f"+ CC-tips pass-through ${ap['cc_tips_passthrough']:,.2f} "
+        f"(PaymentDetails_raw, voided excluded, 4 AM business-day cutoff) "
+        f"+ estimated employer FICA 7.65% ${ap['employer_fica_est']:,.2f}. "
+        "The pay period ended Sun 12/28 was already funded by the 12/31 wire "
+        "($71,212.57), so nothing earlier remains accrued. CAVEATS for BAED: "
+        "(1) the 12/31 business day includes post-midnight NYE hours (4 AM "
+        "cutoff) that strictly belong to 2026 — immaterial but noted; "
+        "(2) employer FICA is an estimate — true burden (FICA/FUTA/SUTA/PEO "
+        "admin) is on the Choice Employer invoice for the 1/14/2026 run."
     )
 
     # Contingency evaluation — deferred to BAED (ASC 450); no amount stated.
@@ -1153,8 +1248,9 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         flags.append(
             f"WARNING — unreconciled_difference = ${unreconciled_difference:,.2f}. "
             "This plug is included in total_equity to force the balance sheet to tie. "
-            "Resolve ACCOUNTANT INPUT placeholders (cash, depreciation_2025, "
-            "net_income_2025, accounts_payable, accrued_payroll) to eliminate this gap."
+            "Resolve ACCOUNTANT INPUT placeholders (depreciation_2025, "
+            "net_income_2025) to eliminate this gap (accounts_payable is "
+            "now an estimate — BAED to true up)."
         )
 
     # Add the plug to the equity section so the sheet ties by construction.
@@ -1442,7 +1538,7 @@ def write_excel(bs: dict) -> str:
 
     rows_liab = [
         ("Taxes Payable (TX Comptroller)",   0.0,  liabilities["taxes_payable"],   False),
-        ("Accounts Payable",                 0.0,  liabilities["accounts_payable"], True),
+        ("Accounts Payable (ESTIMATE — BAED to true up)", 0.0, liabilities["accounts_payable"], True),
         ("Accrued Payroll (incl. staff svc-charge share)", 0.0, liabilities["accrued_payroll"], True),
     ]
     for label, v24, v25, is_input in rows_liab:
@@ -2163,8 +2259,9 @@ def write_pdf(bs: dict) -> str:
     story.append(Paragraph(
         f"The unreconciled difference ({_money(bs['unreconciled_difference'])}) is a plug "
         "that forces the sheet to balance. "
-        "It will collapse to $0 when cash, net income 2025, depreciation, AP, and accrued payroll "
-        "are supplied by the accountant.",
+        "It will collapse to $0 when net income 2025 and depreciation "
+        "are supplied by the accountant (cash, inventory, and accrued payroll are "
+        "resolved; AP is carried as a $69,275.37 estimate pending BAED true-up).",
         STYLE_NOTE,
     ))
     story.append(PageBreak())
@@ -2271,14 +2368,27 @@ def write_pdf(bs: dict) -> str:
             STYLE_BODY,
         ),
         Paragraph(
-            "<b>3. Accrued payroll.</b> Wages for Dec 29–31, 2025 (paid January 2026), including "
-            "the staff service-charge share passed through payroll. Hours available from the "
-            "Toast Labor API.",
+            "<b>3. Accrued payroll — RESOLVED.</b> Wages, service charges, and tips earned "
+            "Dec 29–31, 2025 (paid via the 1/14/2026 Choice Employer wire) are booked at "
+            f"{_money(ACCRUED_PAYROLL_1231_2025_TOTAL)} from Toast labor and payment data; "
+            "employer FICA is estimated at 7.65% — confirm the exact burden on the Choice "
+            "Employer invoice.",
             STYLE_BODY,
         ),
         Paragraph(
-            f"<b>4. Remaining book balances.</b> Cash, 2025 net income, depreciation, and accounts "
-            f"payable. Once supplied, the unreconciled difference "
+            "<b>4. Accounts payable — ESTIMATE.</b> Booked at "
+            f"{_money(ACCOUNTS_PAYABLE_1231_2025_TOTAL)}: derived trade AP "
+            f"{_money(ACCOUNTS_PAYABLE_1231_2025['derived_trade_ap'])} (Jan 1–14, 2026 "
+            "bank payments inferred as December-incurred via vendor payment lags) "
+            f"+ credit cards due {_money(ACCOUNTS_PAYABLE_1231_2025['credit_cards_due'])} "
+            f"+ liquor invoices due {_money(ACCOUNTS_PAYABLE_1231_2025['liquor_due'])} "
+            "(both owner estimates, 2026-10-11). Please true up against outstanding "
+            "vendor invoices and December card statements.",
+            STYLE_BODY,
+        ),
+        Paragraph(
+            f"<b>5. Remaining book balances.</b> 2025 net income and depreciation. "
+            f"Once supplied, the unreconciled difference "
             f"({_money(bs['unreconciled_difference'])}) collapses to $0.",
             STYLE_BODY,
         ),
@@ -2529,9 +2639,11 @@ def write_pdf(bs: dict) -> str:
     open_items = [
         ["Item", "Placeholder Used", "Data Source / Action Required"],
         ["Cash at 12/31/2025",
-         "$0",
-         "BQ shows -$473.97 (intraday low after $71K payroll wire). "
-         "Use Dec-2025 BofA statement closing balance. Request from BofA online portal."],
+         "-$473.97 (RESOLVED)",
+         "BofA x5815 CLOSING ledger balance, verified by running-balance chain "
+         "(1/2/2026 opens from -473.97; BofA charged 12/31 overdraft fees). "
+         "BAED may reclass the book overdraft to a current liability on Schedule L. "
+         "Cross-check Dec-2025 paper statement; confirm CHK 0227/9121 balances."],
         ["2025 Depreciation",
          "$0 (no add'l dep.)",
          "Fixed-asset schedule required. 2024 accum. dep. = $9,278 carried forward."],
@@ -2540,13 +2652,16 @@ def write_pdf(bs: dict) -> str:
          "Reference LOV3_HTX_Financial_Statements_SBA.xlsx (adjusted P&L). "
          "Insert 2025 accrual-basis book income before filing K-1s."],
         ["Accounts Payable",
-         "$0",
-         "No AP sub-ledger available. Confirm outstanding vendor invoices at 12/31/2025."],
+         "$69,275.37 (ESTIMATE)",
+         "Derived trade AP $19,275.37 (Jan 1-14, 2026 bank payments inferred as "
+         "Dec-incurred via vendor payment lags) + credit cards due $30,000 + "
+         "liquor invoices due $20,000 (owner estimates 2026-10-11). True up "
+         "against vendor invoices and Dec card statements."],
         ["Accrued Payroll",
-         "$0",
-         "Wages earned Dec 29-31, 2025 paid in Jan 2026, including the staff share "
-         "of service charges (passed to staff through payroll). Source: Toast Labor "
-         "API time entries x wage rates plus the Jan-2026 payroll register."],
+         "$15,084.56 (RESOLVED)",
+         "Earned Dec 29-31, paid via 1/14/2026 Choice wire: wages $4,251.27 + "
+         "svc-charge pass-through $7,101.21 + CC tips $2,660.12 + est. employer "
+         "FICA $1,071.96. Confirm exact burden on the Choice Employer invoice."],
         ["Contingency Evaluation (ASC 450)",
          "Deferred to BAED",
          "Evaluate whether the additional-revenue variance over filed MB amounts "
@@ -2558,8 +2673,10 @@ def write_pdf(bs: dict) -> str:
          "$373,592 (2024 balance)",
          "Large A/R for a card restaurant. Confirm treatment: collect, write off, or reclassify."],
         ["Inventory 2025",
-         "$32,191 (2024 balance)",
-         "Physical count at 12/31/2025 required."],
+         "$29,377 (RESOLVED)",
+         "BevSpot finalized physical count 12/29/2025 (212 items, Ashley Baines); "
+         "no purchases received between the count and 12/31. Bar inventory — "
+         "confirm no material non-bar stock at year-end."],
         ["Partner Ownership %",
          "Eddie 45% / Derwin 40% / Maurice 15%",
          "Owner-confirmed 2026-10-11 (sums to 100%). The 2024 K-1s as printed "
