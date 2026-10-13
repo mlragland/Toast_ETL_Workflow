@@ -20,8 +20,8 @@ from itertools import combinations
 # they are holding. Bump on any re-issue.
 # ---------------------------------------------------------------------------
 
-PACKAGE_VERSION = "2.5"
-PACKAGE_VERSION_DATE = "2026-10-11"
+PACKAGE_VERSION = "2.6"
+PACKAGE_VERSION_DATE = "2026-10-13"
 
 # ---------------------------------------------------------------------------
 # Tax rates
@@ -763,19 +763,53 @@ RECLASS_2025 = {
     "non_owner_distribution_C":       15796.60,  # Polekatz/Carioca/Rio, Derwin transport, Brazil/DR lodging
 }
 
+# v2.6 (owner directive 2026-10-13): the Owner Draws / Transfers category
+# ($172,406.51 net, 108 txns) is RECLASSIFIED off the distribution line in full,
+# based on transaction-level BankTransactions_raw analysis:
+#   (a) Reserve-account transfers (CHK 0227 / CHK 9121) — round-trips within the
+#       LOV3-adjacent reserve-account system, NOT distributions:
+#         out: 0227 -134,015.00 (52 txns) + 9121 -20,300.00 (2) = -154,315.00
+#         credits netted inside the category: +59,500.00  ->  NET OUT 94,815.00
+#       Context: 2025 transfers IN from the same accounts across ALL categories
+#       total +370,681.51 (incl. $305,831.51 "Internal Account Transfer" that
+#       funded payroll) — net flow +216,366.51 INTO operations. The reserve
+#       system injected, not extracted. Classification (consolidate as LOV3
+#       cash accounts vs. due to/from related accounts) is a BAED decision.
+#   (b) LOV3 BUSINESS CARD payments + expense reimbursement -> Sec. 162
+#       DEDUCTIBLE subject to substantiation from the 2025 card statements
+#       (any personal spend found on the statements reverts to distribution):
+#         AMEX (LOV3 business card held in Eddie Jasper's name — owner-
+#         confirmed 2026-10-13) 67,624.89 (47 pmts)
+#         + Capital One (Eddie Jasper — owner to confirm business-card
+#         status) 8,566.62 (2)
+#         + Zelle to Eddie "Rembursiment marketing" 1,400.00  =  77,591.51
+OWNER_DRAWS_RECLASS_V26 = {
+    "reserve_transfers_out_gross":   154315.00,  # 0227 134,015.00 + 9121 20,300.00
+    "reserve_transfer_credits":       59500.00,  # credits netted in the draws category
+    "reserve_transfers_net":          94815.00,  # -> due to/from related accounts
+    "reserve_transfers_in_2025":     370681.51,  # all categories, same accounts
+    "reserve_net_inflow_2025":       216366.51,  # net 2025 flow INTO operations
+    "amex_eddie_payments":            67624.89,
+    "capital_one_eddie_payments":      8566.62,
+    "zelle_marketing_reimbursement":   1400.00,
+    "reimbursed_business_expenses":   77591.51,  # -> Sec. 162 deductible (substantiation req.)
+}
+
 # Reconciled 2025 distributions for the capital roll-forward / K-1 Line 19A:
 #   combined owner-attributable (net)        225,496.37
 #   less A-bucket owner spend -> Sec. 162    (41,024.18)  = 31,242.77 + 9,781.41
 #   plus C items from non-owner categories    15,796.60
-#   = reconciled distributions               200,268.79
+#   less Owner Draws/Transfers reclass v2.6 (172,406.51)  = 94,815.00 + 77,591.51
+#   = reconciled distributions                27,862.28
 # (Owner-category credits are already netted inside the 225,496.37; whether they
 #  offset the expense portion instead is a BAED call worth +/- $1,649.96.)
 DISTRIBUTIONS_2025_RECONCILED = round(
     abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
     - (RECLASS_2025["owner_disc_deductible_A"] + RECLASS_2025["owner_travel_deductible_A"])
-    + RECLASS_2025["non_owner_distribution_C"],
+    + RECLASS_2025["non_owner_distribution_C"]
+    - RECLASS_2025["owner_draws_transfers"],  # v2.6 reclass — see OWNER_DRAWS_RECLASS_V26
     2,
-)  # 200,268.79
+)  # 27,862.28
 
 # 2025 fixed-asset additions — reclass bucket E (Capital Equipment 18,082.31 +
 # Construction Build Out 30,000.00).  Removed from expense; capitalized here.
@@ -1165,6 +1199,10 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         "taxes_payable":   round(taxes_payable, 2),
         "accounts_payable": round(accounts_payable, 2),
         "accrued_payroll":  round(accrued_payroll, 2),
+        # v2.6 placeholder — CHK 0227/9121 reserve-account relationship.
+        # Carried at $0 pending BAED classification (consolidate as LOV3 cash
+        # vs. book due to/from with beginning balance). See the v2.6 flag.
+        "due_to_from_related_accounts": 0.0,
     }
     total_liabilities = round(sum(liabilities.values()), 2)
 
@@ -1184,13 +1222,15 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
 
     # 2025 distributions — RECONCILED to the expense reclassification schedule
     # (single source of truth; eliminates the double-count between the raw BQ
-    # owner-category total and the reclass C bucket).  Walk:
+    # owner-category total and the reclass C bucket).  Walk (v2.6):
     #   combined owner-attributable (BQ, net)   225,496.37
     #   less A-bucket owner spend -> Sec. 162   (41,024.18)
     #   plus C items from non-owner categories   15,796.60
-    #   = reconciled distributions              200,268.79
+    #   less Owner Draws/Transfers reclass     (172,406.51)
+    #   = reconciled distributions               27,862.28
     raw_owner_total = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
     distributions_2025 = DISTRIBUTIONS_2025_RECONCILED
+    _v26 = OWNER_DRAWS_RECLASS_V26
     flags.append(
         f"NOTE — distributions_2025 RECONCILED = ${distributions_2025:,.2f} "
         f"(raw BQ owner-category total ${raw_owner_total:,.2f} "
@@ -1200,21 +1240,65 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
         f"Travel ${RECLASS_2025['owner_travel_deductible_A']:,.2f}] "
         f"PLUS ${RECLASS_2025['non_owner_distribution_C']:,.2f} of nondeductible C items from "
         "non-owner categories [Polekatz/Carioca/Rio entertainment, Derwin transport, Brazil/DR "
-        "lodging]). This is the single working figure — do NOT also add the reclass C bucket "
-        "to the raw total (double-count). Owner-category credits of "
+        f"lodging] LESS ${RECLASS_2025['owner_draws_transfers']:,.2f} Owner Draws/Transfers "
+        "reclassified in v2.6 — see the v2.6 flags below). This is the single working figure — "
+        "do NOT also add the reclass C bucket to the raw total (double-count). "
+        "Owner-category credits of "
         f"${RECLASS_2025['owner_category_credits']:,.2f} are netted inside the raw total; "
         "BAED may offset them against the expense portion instead (+/- that amount). "
         "Prior SBA P&L showed $231,907 Owner Draws; residual gap vs. raw total ~$6,411 "
         "(uncategorized rows $1,740.77 / Admin & Office). Reconcile to K-1 before filing."
     )
     flags.append(
+        "RECLASS v2.6 (owner directive 2026-10-13) — reserve-account transfers: "
+        f"${_v26['reserve_transfers_net']:,.2f} net of the former Owner Draws category "
+        f"(transfers OUT to CHK 0227 $134,015.00 [52 txns] + CHK 9121 $20,300.00 [2], "
+        f"gross ${_v26['reserve_transfers_out_gross']:,.2f}, less "
+        f"${_v26['reserve_transfer_credits']:,.2f} credits netted in-category) is "
+        "REMOVED from distributions. These are round-trips within the LOV3-adjacent "
+        "reserve-account system, not owner draws: 2025 transfers IN from the same "
+        f"accounts total ${_v26['reserve_transfers_in_2025']:,.2f} across all categories "
+        "(including $305,831.51 of Internal Account Transfers that funded payroll) — "
+        f"a NET INFLOW of ${_v26['reserve_net_inflow_2025']:,.2f} INTO operations. "
+        "ACCOUNTANT DECISION: classify CHK 0227/9121 as (a) LOV3-controlled cash "
+        "accounts — consolidate their 12/31/2025 balances onto this balance sheet — or "
+        "(b) owner/related-party accounts — book a due to/from related accounts "
+        "balance (beginning-balance determination required; the due_to_from_related_"
+        "accounts liability line is carried at $0 placeholder pending this call). "
+        "Owner context: the reserve accounts hold previously-collected cash and are "
+        "used to fund payroll."
+    )
+    flags.append(
+        "RECLASS v2.6 (owner directive 2026-10-13) — business-card payments -> "
+        f"Sec. 162 DEDUCTIBLE: ${_v26['reimbursed_business_expenses']:,.2f} of the former "
+        "Owner Draws category is reclassified to deductible business expense: AMEX "
+        f"${_v26['amex_eddie_payments']:,.2f} (47 payments on the LOV3 BUSINESS card held "
+        "in Eddie Jasper's name — owner-confirmed 2026-10-13, consistent with the *1201/"
+        f"*1370 business cards) + Capital One ${_v26['capital_one_eddie_payments']:,.2f} "
+        "(2 payments, Eddie Jasper — owner to confirm business-card status) + Zelle to "
+        f"Eddie ${_v26['zelle_marketing_reimbursement']:,.2f} (memo: 'Rembursiment "
+        "marketing'). SUBSTANTIATION REQUIRED: the 2025 AMEX and Capital One statements "
+        "must classify the underlying charges; any personal spend found on the "
+        "statements reverts to distribution (K-1 Line 19A). DO NOT double-count: the "
+        "deduction is taken on the card-statement charges OR the card payments, never "
+        "both (same rule as the $48,759.49 G-bucket Credit Card Payments -> Marketing). "
+        "This expense reduces 2025 book net income (an ACCOUNTANT INPUT) and creates a "
+        "book-to-SBA difference — the accepted SBA P&L treated these payments as owner "
+        "draws; handle via a book-to-SBA reconciliation note, never by restating the "
+        "accepted statement."
+    )
+    flags.append(
         f"PER-PARTNER DISTRIBUTIONS (owner directive 2026-10-11): the ${distributions_2025:,.2f} "
         "reconciled total is attributed to EDDIE JASPER for K-1 Line 19A per Maurice — the 2025 "
-        "draws are considered Eddie's. All bank cards (*1201, *1370) are LOV3 business cards, not "
-        "personal cards. Maurice and Derwin: $0 Line 19A for 2025 unless BAED identifies draws in "
+        "draws are considered Eddie's (components: Owner Discretionary C $13,123.64 + Owner "
+        "Travel C $592.00 - owner-category credits $1,649.96 + non-owner C items $15,796.60). "
+        "All bank cards (*1201, *1370, AMEX) are LOV3 business cards, not personal cards. "
+        "Maurice and Derwin: $0 Line 19A for 2025 unless BAED identifies draws in "
         "partner records not visible in the bank data. Accountant still determines whether any "
         "distribution components are better treated as Sec. 707(c) guaranteed payments — any "
-        "distribution portion is Eddie-attributed."
+        "distribution portion is Eddie-attributed. NOTE: if any portion of the v2.6 reclass "
+        "fails substantiation (personal spend on card statements) or the reserve accounts are "
+        "determined to be owner-held draws after all, that portion reverts to Line 19A."
     )
 
     # Service charge tie-out (owner directive 2026-10-11): gross service charges
@@ -1305,8 +1389,12 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
             f"WARNING — unreconciled_difference = ${unreconciled_difference:,.2f}. "
             "This plug is included in total_equity to force the balance sheet to tie. "
             "Resolve ACCOUNTANT INPUT placeholders (depreciation_2025, "
-            "net_income_2025) to eliminate this gap (accounts_payable is "
-            "now an estimate — BAED to true up)."
+            "net_income_2025, due_to_from_related_accounts) to eliminate this gap "
+            "(accounts_payable is now an estimate — BAED to true up). The v2.6 "
+            "reclass moved $172,406.51 out of distributions into the plug pending "
+            "resolution: $77,591.51 belongs in 2025 book net income as deductible "
+            "card expense, and $94,815.00 resolves with the reserve-account "
+            "classification."
         )
 
     # Add the plug to the equity section so the sheet ties by construction.
@@ -1596,6 +1684,8 @@ def write_excel(bs: dict) -> str:
         ("Taxes Payable (TX Comptroller)",   0.0,  liabilities["taxes_payable"],   False),
         ("Accounts Payable (ESTIMATE — BAED to true up)", 0.0, liabilities["accounts_payable"], True),
         ("Accrued Payroll (incl. staff svc-charge share)", 0.0, liabilities["accrued_payroll"], True),
+        ("Due to/from Related Accounts — CHK 0227/9121 (ACCOUNTANT INPUT)", 0.0,
+         liabilities["due_to_from_related_accounts"], True),
     ]
     for label, v24, v25, is_input in rows_liab:
         _label(ws1, r, 1, label, indent=1)
@@ -2316,12 +2406,16 @@ def write_pdf(bs: dict) -> str:
     story.append(Paragraph(
         f"The unreconciled difference ({_money(bs['unreconciled_difference'])}) is a plug "
         "that forces the sheet to balance. "
-        "It will collapse to $0 when net income 2025 and depreciation "
-        "are supplied by the accountant (cash, inventory, A/R, and accrued payroll are "
-        "resolved; AP is carried as a $69,275.37 estimate pending BAED true-up). "
+        "It will collapse to $0 when net income 2025, depreciation, and the "
+        "reserve-account classification are supplied by the accountant (cash, "
+        "inventory, A/R, and accrued payroll are resolved; AP is carried as a "
+        "$69,275.37 estimate pending BAED true-up). "
         "A negative plug indicates 2025 book net income must absorb the A/R "
         "carry-forward write-down of $311,836.08 unless BAED reclassifies or "
-        "amends the 2024 Schedule L.",
+        "amends the 2024 Schedule L. The v2.6 reclass moved $172,406.51 out of "
+        "distributions into this plug pending resolution: $77,591.51 of deductible "
+        "business-card expense (belongs in 2025 net income) and $94,815.00 of "
+        "reserve-account transfers (resolves with the CHK 0227/9121 classification).",
         STYLE_NOTE,
     ))
     story.append(PageBreak())
@@ -2405,6 +2499,28 @@ def write_pdf(bs: dict) -> str:
             f"Toast-based top line and must appear in book revenue.",
             STYLE_BODY,
         ),
+        Paragraph(
+            f"<b>5. Owner Draws reclassification (v2.6).</b> The Owner Draws / Transfers "
+            f"category ({_pf(RECLASS_2025['owner_draws_transfers'])} net) is reclassified off "
+            f"the distribution line in full: "
+            f"(a) {_pf(OWNER_DRAWS_RECLASS_V26['reserve_transfers_net'])} of net transfers to "
+            f"the CHK 0227/9121 reserve accounts — these accounts injected a NET "
+            f"{_pf(OWNER_DRAWS_RECLASS_V26['reserve_net_inflow_2025'])} INTO operations in 2025 "
+            f"({_pf(OWNER_DRAWS_RECLASS_V26['reserve_transfers_in_2025'])} in vs. "
+            f"{_pf(OWNER_DRAWS_RECLASS_V26['reserve_transfers_out_gross'])} out), so the "
+            f"outbound transfers are round-trips, not draws. Please classify the accounts "
+            f"(consolidate as LOV3 cash vs. due to/from related accounts with a beginning "
+            f"balance); the balance sheet carries a $0 placeholder line. "
+            f"(b) {_pf(OWNER_DRAWS_RECLASS_V26['reimbursed_business_expenses'])} of payments on "
+            f"the LOV3 business AMEX held in Eddie Jasper's name "
+            f"({_pf(OWNER_DRAWS_RECLASS_V26['amex_eddie_payments'])}), Capital One "
+            f"({_pf(OWNER_DRAWS_RECLASS_V26['capital_one_eddie_payments'])}), and a Zelle "
+            f"marketing reimbursement ({_pf(OWNER_DRAWS_RECLASS_V26['zelle_marketing_reimbursement'])}) "
+            f"— §162 deductible subject to the 2025 card statements; any personal spend found "
+            f"reverts to distribution. Deduct the statement charges OR the card payments, "
+            f"never both.",
+            STYLE_BODY,
+        ),
         Spacer(1, 0.08 * inch),
         Paragraph("Inputs required from BAED before the balance sheet is final", STYLE_H2),
         Paragraph(
@@ -2420,11 +2536,13 @@ def write_pdf(bs: dict) -> str:
             f"<b>2. Per-partner distribution classification.</b> Reconciled 2025 owner "
             f"distributions of {_pf(_distr_total)} (raw bank-category total $225,496.37, less "
             f"$41,024.18 reclassified to §162 expense, plus $15,796.60 of nondeductible items "
-            f"from non-owner categories — see the Expense Reclassification Schedule) are "
+            f"from non-owner categories, less the $172,406.51 v2.6 Owner Draws reclassification "
+            f"— see referred item 5 and the Expense Reclassification Schedule) are "
             f"attributed to Eddie Jasper for K-1 Line 19A (owner-confirmed 2026-10-11; all bank "
-            f"cards are LOV3 business cards; Maurice and Derwin $0 unless partner records show "
-            f"otherwise). BAED to confirm the classification and whether any portion is a "
-            f"§707(c) guaranteed payment.",
+            f"cards including the AMEX are LOV3 business cards; Maurice and Derwin $0 unless "
+            f"partner records show otherwise). BAED to confirm the classification and whether "
+            f"any portion is a §707(c) guaranteed payment. Any v2.6 reclass component that "
+            f"fails substantiation reverts to Line 19A.",
             STYLE_BODY,
         ),
         Paragraph(
@@ -2447,8 +2565,9 @@ def write_pdf(bs: dict) -> str:
             STYLE_BODY,
         ),
         Paragraph(
-            f"<b>5. Remaining book balances.</b> 2025 net income and depreciation. "
-            f"Once supplied, the unreconciled difference "
+            f"<b>5. Remaining book balances.</b> 2025 net income, depreciation, and the "
+            f"CHK 0227/9121 reserve-account classification (due to/from related accounts "
+            f"is carried at $0 placeholder). Once supplied, the unreconciled difference "
             f"({_money(bs['unreconciled_difference'])}) collapses to $0.",
             STYLE_BODY,
         ),
@@ -2659,8 +2778,27 @@ def write_pdf(bs: dict) -> str:
          _dist_total,
          _cell(f"Confirm reconciled distributions ({_dist_total} = raw bank total "
                "$225,496.37 − $41,024.18 reclassified to §162 expense + $15,796.60 "
-               "nondeductible items from non-owner categories) ties to K-1 Line 19A "
+               "nondeductible items from non-owner categories − $172,406.51 v2.6 "
+               "Owner Draws reclass, entries 6c/6d) ties to K-1 Line 19A "
                "(all Eddie-attributed per owner directive 2026-10-11)")],
+        ["6c", _cell("Marketing / Promo / Supplies (per card statements)"),
+         _cell("Cash / Bank"),
+         _pf(OWNER_DRAWS_RECLASS_V26["reimbursed_business_expenses"]),
+         _cell("v2.6: LOV3 business-card payments reclassified from Owner Draws to "
+               "§162 expense — AMEX (LOV3 business card, Eddie Jasper) "
+               f"{_pf(OWNER_DRAWS_RECLASS_V26['amex_eddie_payments'])} + Capital One "
+               f"{_pf(OWNER_DRAWS_RECLASS_V26['capital_one_eddie_payments'])} + Zelle "
+               f"marketing reimbursement "
+               f"{_pf(OWNER_DRAWS_RECLASS_V26['zelle_marketing_reimbursement'])}. "
+               "SUBSTANTIATION: 2025 card statements; personal spend reverts to "
+               "distribution. Deduct statement charges OR card payments, never both.")],
+        ["6d", _cell("Due to/from Related Accounts"), _cell("Cash / Bank"),
+         _pf(OWNER_DRAWS_RECLASS_V26["reserve_transfers_net"]),
+         _cell("v2.6: net CHK 0227/9121 reserve transfers reclassified from Owner "
+               "Draws to the related-account relationship (2025 net flow was "
+               f"{_pf(OWNER_DRAWS_RECLASS_V26['reserve_net_inflow_2025'])} INTO "
+               "operations). BAED to classify the accounts: consolidate as LOV3 cash "
+               "or book due to/from with a beginning balance.")],
         ["6a", _cell("Payroll / Wages (service charges — 100% staff)"),
          _cell("Service Charge Income (pass-through)"),
          _pf(SERVICE_CHARGE_2025["staff_share_passthrough"]),
@@ -2754,10 +2892,22 @@ def write_pdf(bs: dict) -> str:
         ["Per-Partner Distribution Split",
          "Eddie Jasper — 100%",
          "Owner directive 2026-10-11: 2025 draws are considered Eddie's (all bank cards "
-         "are LOV3 business cards). Full $225,496.37 to Eddie's Line 19A; Maurice and "
-         "Derwin $0 unless partner records show otherwise. Classify Discretionary ($43,676) "
-         "and Travel ($9,413): distribution, Sec. 162 expense, or Sec. 707(c) guaranteed "
-         "payment."],
+         "incl. AMEX are LOV3 business cards). Reconciled $27,862.28 to Eddie's Line 19A "
+         "after the v2.6 reclass; Maurice and Derwin $0 unless partner records show "
+         "otherwise. Classify Discretionary ($43,676) and Travel ($9,413): distribution, "
+         "Sec. 162 expense, or Sec. 707(c) guaranteed payment."],
+        ["Business-Card Expense (v2.6)",
+         "$77,591.51 (SUBSTANTIATION REQ.)",
+         "AMEX $67,624.89 (LOV3 business card, Eddie Jasper) + Capital One $8,566.62 + "
+         "Zelle marketing reimbursement $1,400. Classify the underlying 2025 card-statement "
+         "charges; personal spend reverts to distribution. Belongs in 2025 book net income "
+         "as Sec. 162 expense — do not double-count against statement-level charges."],
+        ["Reserve Accounts CHK 0227/9121 (v2.6)",
+         "$0 (due to/from placeholder)",
+         "2025 activity: $370,681.51 in / $154,315.00 out — net $216,366.51 INTO operations. "
+         "Classify: consolidate as LOV3 cash accounts (add 12/31 balances to the balance "
+         "sheet) or book due to/from related accounts with a beginning-balance "
+         "determination."],
     ]
     tbl_open = Table(open_items,
                      colWidths=[body_w * 0.25, body_w * 0.20, body_w * 0.55])

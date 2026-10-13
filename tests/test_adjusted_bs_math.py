@@ -290,15 +290,18 @@ from adjusted_balance_sheet_2025 import (
 
 
 def test_reconciled_distributions_walk():
-    """Reconciled = raw owner total - owner A-bucket spend + non-owner C items."""
+    """Reconciled = raw owner total - owner A-bucket spend + non-owner C items
+    - the v2.6 Owner Draws/Transfers reclass (reserve round-trips + business-card
+    payments)."""
     raw = abs(BQ_RESULTS["owner_distributions_2025"]["combined_owner_attributable"])
     expected = round(
         raw
         - (RECLASS_2025["owner_disc_deductible_A"] + RECLASS_2025["owner_travel_deductible_A"])
-        + RECLASS_2025["non_owner_distribution_C"],
+        + RECLASS_2025["non_owner_distribution_C"]
+        - RECLASS_2025["owner_draws_transfers"],
         2,
     )
-    assert DISTRIBUTIONS_2025_RECONCILED == expected == 200268.79
+    assert DISTRIBUTIONS_2025_RECONCILED == expected == 27862.28
 
 
 def test_reclass_owner_categories_tie_to_bq_net_of_credits():
@@ -420,6 +423,53 @@ def test_accounts_receivable_settlement_verified():
 
 
 def test_balance_sheet_still_ties_after_v25_inputs():
+    bs = build_balance_sheet()
+    a, l = bs["total_assets"], bs["total_liabilities"]
+    assert round(a - l - bs["total_equity"], 2) == 0.0
+
+
+# --- v2.6: Owner Draws/Transfers reclass (owner-directed 2026-10-13)
+
+def test_owner_draws_reclass_v26_components_sum():
+    from adjusted_balance_sheet_2025 import OWNER_DRAWS_RECLASS_V26
+    v = OWNER_DRAWS_RECLASS_V26
+    # reserve transfers: gross out less in-category credits = net
+    assert round(v["reserve_transfers_out_gross"] - v["reserve_transfer_credits"], 2) \
+        == v["reserve_transfers_net"] == 94815.00
+    # card/Zelle payments sum to the deductible subtotal
+    assert round(v["amex_eddie_payments"] + v["capital_one_eddie_payments"]
+                 + v["zelle_marketing_reimbursement"], 2) \
+        == v["reimbursed_business_expenses"] == 77591.51
+    # the two pieces fully explain the former Owner Draws category net
+    assert round(v["reserve_transfers_net"] + v["reimbursed_business_expenses"], 2) \
+        == RECLASS_2025["owner_draws_transfers"] == 172406.51
+    # 2025 net reserve flow was INTO operations
+    assert round(v["reserve_transfers_in_2025"] - v["reserve_transfers_out_gross"], 2) \
+        == v["reserve_net_inflow_2025"] == 216366.51
+
+
+def test_v26_distributions_drop_to_residual_c_items():
+    # residual 19A = disc C + travel C - owner credits + non-owner C
+    expected = round(
+        RECLASS_2025["owner_disc_distribution_C"]
+        + RECLASS_2025["owner_travel_distribution_C"]
+        - RECLASS_2025["owner_category_credits"]
+        + RECLASS_2025["non_owner_distribution_C"],
+        2,
+    )
+    assert DISTRIBUTIONS_2025_RECONCILED == expected == 27862.28
+
+
+def test_v26_due_to_from_placeholder_and_flags():
+    bs = build_balance_sheet()
+    assert bs["liabilities"]["due_to_from_related_accounts"] == 0.0
+    joined = " ".join(bs["flags"])
+    assert "RECLASS v2.6" in joined
+    assert "$94,815.00" in joined
+    assert "$77,591.51" in joined
+
+
+def test_balance_sheet_still_ties_after_v26_reclass():
     bs = build_balance_sheet()
     a, l = bs["total_assets"], bs["total_liabilities"]
     assert round(a - l - bs["total_equity"], 2) == 0.0

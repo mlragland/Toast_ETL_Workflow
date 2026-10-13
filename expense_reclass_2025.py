@@ -24,8 +24,8 @@ formerly-review Zelle/vehicle items owner-confirmed as LOV3 business expenses.
 import sys
 from google.cloud import bigquery
 
-PACKAGE_VERSION = "2.5"
-PACKAGE_VERSION_DATE = "2026-10-11"
+PACKAGE_VERSION = "2.6"
+PACKAGE_VERSION_DATE = "2026-10-13"
 
 OUT_PATH = "LOV3_2025_Expense_Reclassification_Schedule.xlsx"
 
