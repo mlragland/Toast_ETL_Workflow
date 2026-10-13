@@ -20,7 +20,7 @@ from itertools import combinations
 # they are holding. Bump on any re-issue.
 # ---------------------------------------------------------------------------
 
-PACKAGE_VERSION = "2.6"
+PACKAGE_VERSION = "2.6.1"
 PACKAGE_VERSION_DATE = "2026-10-13"
 
 # ---------------------------------------------------------------------------
@@ -775,8 +775,10 @@ RECLASS_2025 = {
 #       funded payroll) — net flow +216,366.51 INTO operations. The reserve
 #       system injected, not extracted. Classification (consolidate as LOV3
 #       cash accounts vs. due to/from related accounts) is a BAED decision.
-#   (b) LOV3 BUSINESS CARD payments + expense reimbursement -> Sec. 162
-#       DEDUCTIBLE subject to substantiation from the 2025 card statements
+#   (b) LOV3 BUSINESS CARD payments + expense reimbursement -> MARKETING &
+#       ADVERTISING expense (Sec. 162; owner directive 2026-10-13, same line
+#       as the G-bucket Credit Card Payments $48,759.49), subject to
+#       substantiation from the 2025 card statements
 #       (any personal spend found on the statements reverts to distribution):
 #         AMEX (LOV3 business card held in Eddie Jasper's name — owner-
 #         confirmed 2026-10-13) 67,624.89 (47 pmts)
@@ -792,7 +794,7 @@ OWNER_DRAWS_RECLASS_V26 = {
     "amex_eddie_payments":            67624.89,
     "capital_one_eddie_payments":      8566.62,
     "zelle_marketing_reimbursement":   1400.00,
-    "reimbursed_business_expenses":   77591.51,  # -> Sec. 162 deductible (substantiation req.)
+    "reimbursed_business_expenses":   77591.51,  # -> Marketing & Advertising (Sec. 162)
 }
 
 # Reconciled 2025 distributions for the capital roll-forward / K-1 Line 19A:
@@ -1270,18 +1272,20 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
     )
     flags.append(
         "RECLASS v2.6 (owner directive 2026-10-13) — business-card payments -> "
-        f"Sec. 162 DEDUCTIBLE: ${_v26['reimbursed_business_expenses']:,.2f} of the former "
-        "Owner Draws category is reclassified to deductible business expense: AMEX "
+        f"MARKETING & ADVERTISING (Sec. 162): ${_v26['reimbursed_business_expenses']:,.2f} of "
+        "the former Owner Draws category is assigned to the Marketing & Advertising "
+        "expense line (owner directive 2026-10-13, same line as the $48,759.49 G-bucket "
+        "Credit Card Payments): AMEX "
         f"${_v26['amex_eddie_payments']:,.2f} (47 payments on the LOV3 BUSINESS card held "
         "in Eddie Jasper's name — owner-confirmed 2026-10-13, consistent with the *1201/"
         f"*1370 business cards) + Capital One ${_v26['capital_one_eddie_payments']:,.2f} "
         "(2 payments, Eddie Jasper — owner to confirm business-card status) + Zelle to "
         f"Eddie ${_v26['zelle_marketing_reimbursement']:,.2f} (memo: 'Rembursiment "
         "marketing'). SUBSTANTIATION REQUIRED: the 2025 AMEX and Capital One statements "
-        "must classify the underlying charges; any personal spend found on the "
-        "statements reverts to distribution (K-1 Line 19A). DO NOT double-count: the "
+        "support the Marketing & Advertising classification; any personal spend found on "
+        "the statements reverts to distribution (K-1 Line 19A). DO NOT double-count: the "
         "deduction is taken on the card-statement charges OR the card payments, never "
-        "both (same rule as the $48,759.49 G-bucket Credit Card Payments -> Marketing). "
+        "both (same rule as the G-bucket Credit Card Payments -> Marketing). "
         "This expense reduces 2025 book net income (an ACCOUNTANT INPUT) and creates a "
         "book-to-SBA difference — the accepted SBA P&L treated these payments as owner "
         "draws; handle via a book-to-SBA reconciliation note, never by restating the "
@@ -1392,8 +1396,8 @@ def build_balance_sheet(asof: str = "2025-12-31") -> dict:
             "net_income_2025, due_to_from_related_accounts) to eliminate this gap "
             "(accounts_payable is now an estimate — BAED to true up). The v2.6 "
             "reclass moved $172,406.51 out of distributions into the plug pending "
-            "resolution: $77,591.51 belongs in 2025 book net income as deductible "
-            "card expense, and $94,815.00 resolves with the reserve-account "
+            "resolution: $77,591.51 belongs in 2025 book net income as Marketing & "
+            "Advertising expense, and $94,815.00 resolves with the reserve-account "
             "classification."
         )
 
@@ -2413,8 +2417,8 @@ def write_pdf(bs: dict) -> str:
         "A negative plug indicates 2025 book net income must absorb the A/R "
         "carry-forward write-down of $311,836.08 unless BAED reclassifies or "
         "amends the 2024 Schedule L. The v2.6 reclass moved $172,406.51 out of "
-        "distributions into this plug pending resolution: $77,591.51 of deductible "
-        "business-card expense (belongs in 2025 net income) and $94,815.00 of "
+        "distributions into this plug pending resolution: $77,591.51 of Marketing & "
+        "Advertising expense (belongs in 2025 net income) and $94,815.00 of "
         "reserve-account transfers (resolves with the CHK 0227/9121 classification).",
         STYLE_NOTE,
     ))
@@ -2516,9 +2520,10 @@ def write_pdf(bs: dict) -> str:
             f"({_pf(OWNER_DRAWS_RECLASS_V26['amex_eddie_payments'])}), Capital One "
             f"({_pf(OWNER_DRAWS_RECLASS_V26['capital_one_eddie_payments'])}), and a Zelle "
             f"marketing reimbursement ({_pf(OWNER_DRAWS_RECLASS_V26['zelle_marketing_reimbursement'])}) "
-            f"— §162 deductible subject to the 2025 card statements; any personal spend found "
-            f"reverts to distribution. Deduct the statement charges OR the card payments, "
-            f"never both.",
+            f"— assigned to Marketing &amp; Advertising expense (§162, owner directive "
+            f"2026-10-13, same line as the Credit Card Payments category), subject to the "
+            f"2025 card statements; any personal spend found reverts to distribution. Deduct "
+            f"the statement charges OR the card payments, never both.",
             STYLE_BODY,
         ),
         Spacer(1, 0.08 * inch),
@@ -2781,11 +2786,12 @@ def write_pdf(bs: dict) -> str:
                "nondeductible items from non-owner categories − $172,406.51 v2.6 "
                "Owner Draws reclass, entries 6c/6d) ties to K-1 Line 19A "
                "(all Eddie-attributed per owner directive 2026-10-11)")],
-        ["6c", _cell("Marketing / Promo / Supplies (per card statements)"),
+        ["6c", _cell("Marketing & Advertising Expense"),
          _cell("Cash / Bank"),
          _pf(OWNER_DRAWS_RECLASS_V26["reimbursed_business_expenses"]),
          _cell("v2.6: LOV3 business-card payments reclassified from Owner Draws to "
-               "§162 expense — AMEX (LOV3 business card, Eddie Jasper) "
+               "Marketing & Advertising (§162, owner directive 2026-10-13) — AMEX "
+               "(LOV3 business card, Eddie Jasper) "
                f"{_pf(OWNER_DRAWS_RECLASS_V26['amex_eddie_payments'])} + Capital One "
                f"{_pf(OWNER_DRAWS_RECLASS_V26['capital_one_eddie_payments'])} + Zelle "
                f"marketing reimbursement "
@@ -2896,12 +2902,13 @@ def write_pdf(bs: dict) -> str:
          "after the v2.6 reclass; Maurice and Derwin $0 unless partner records show "
          "otherwise. Classify Discretionary ($43,676) and Travel ($9,413): distribution, "
          "Sec. 162 expense, or Sec. 707(c) guaranteed payment."],
-        ["Business-Card Expense (v2.6)",
+        ["Business-Card -> Marketing & Advertising (v2.6)",
          "$77,591.51 (SUBSTANTIATION REQ.)",
          "AMEX $67,624.89 (LOV3 business card, Eddie Jasper) + Capital One $8,566.62 + "
-         "Zelle marketing reimbursement $1,400. Classify the underlying 2025 card-statement "
-         "charges; personal spend reverts to distribution. Belongs in 2025 book net income "
-         "as Sec. 162 expense — do not double-count against statement-level charges."],
+         "Zelle marketing reimbursement $1,400. Assigned to Marketing & Advertising "
+         "(owner directive 2026-10-13); 2025 card statements substantiate; personal spend "
+         "reverts to distribution. Belongs in 2025 book net income — do not double-count "
+         "against statement-level charges."],
         ["Reserve Accounts CHK 0227/9121 (v2.6)",
          "$0 (due to/from placeholder)",
          "2025 activity: $370,681.51 in / $154,315.00 out — net $216,366.51 INTO operations. "
